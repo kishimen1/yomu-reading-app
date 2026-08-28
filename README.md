@@ -2,6 +2,8 @@
 
 ビブリアの主要な読書記録体験をAndroid向けに再構成し、分析とデータ可搬性を強化した独自デザインのPWAです。Vite + TypeScriptへ移行済みで、CapacitorによるAndroidアプリ化へ進められる構成です。
 
+公開版: [https://kishimen1.github.io/yomu-reading-app/](https://kishimen1.github.io/yomu-reading-app/)
+
 ## すぐ試す
 
 初回だけ依存関係をインストールし、開発サーバーを起動します。
@@ -25,7 +27,7 @@ npm test
 
 1. GitHubで空のリポジトリを作り、このフォルダーを `main` ブランチへpushします。
 2. リポジトリの `Settings` → `Pages` → `Build and deployment` で、`Source` を `GitHub Actions` にします。
-3. `Actions` の `Deploy YOMU to GitHub Pages` が完了したら、`https://<ユーザー名>.github.io/<リポジトリ名>/` をAndroid版Chromeで開きます。
+3. `Actions` の `Deploy YOMU to GitHub Pages` が完了したら、公開URLをAndroid版Chromeで開きます。このリポジトリの公開URLは `https://kishimen1.github.io/yomu-reading-app/` です。
 4. YOMUの「設定」→「この端末にインストール」、またはChromeのメニュー→「ホーム画面に追加」を選びます。
 
 GitHubに保存されるのはアプリのコードだけです。各利用者の読書記録はその端末のブラウザー内に保存され、GitHubへは送信されません。機種変更やブラウザーデータ削除に備えて、設定画面からJSONバックアップを保存してください。GitHub FreeでPagesを使う場合は、基本的に公開リポジトリにします。

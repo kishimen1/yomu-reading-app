@@ -16,6 +16,8 @@ Git:
 
 - `main` ブランチで初期化済み。
 - 動作済み静的モックの基準コミットは `2d1be8a`。
+- GitHub公開リポジトリ: `https://github.com/kishimen1/yomu-reading-app`
+- GitHub Pages公開版: `https://kishimen1.github.io/yomu-reading-app/`
 - テスト生成物 `artifacts/`、`dist/`、`node_modules/` はGit対象外。
 
 ## 2. 実装済み
@@ -136,7 +138,7 @@ openBD:
 
 ## 7. 既知の制約
 
-- GitHub Pages向け設定は実装済みだが、GitHubリモート未設定のため未公開。
+- GitHub PagesでHTTPS公開済み。GitHub Actionsによる自動デプロイも動作確認済み。
 - AndroidパッケージIDが未決定のためCapacitorプロジェクトは未生成。
 - ISBN画像認識は未接続。カメラプレビューとサンプル読取まで。
 - 端末DBはlocalStorage。SQLite、全文検索、DBマイグレーションは未実装。
@@ -146,15 +148,14 @@ openBD:
 
 ## 8. 次の推奨作業（優先順）
 
-1. GitHubリポジトリを作成してpushし、PagesのSourceをGitHub ActionsにしてHTTPS公開する。
-2. 学内Wi-FiのAndroid実機でPWAインストール・カメラ・オフラインを確認する。
-3. 正式アプリ名、AndroidパッケージID、公開主体、クラウド同期の要否を確定する。
-4. Capacitorを導入しAndroidプロジェクトを生成する。
-5. SQLiteスキーマとWebスキーマv2からの初回移行を実装する。
-6. ML Kit Barcode Scanning、ネイティブ共有、端末ファイル保存を接続する。
-7. openBD未収録時の書誌フォールバックを決める。
-8. TalkBack、200%文字拡大、5000冊性能、Android実機回帰を追加する。
-9. Play Console内部テスト、クローズドテスト、公開へ進む。
+1. 学内Wi-FiのAndroid実機でPWAインストール・カメラ・オフラインを確認する。
+2. 正式アプリ名、AndroidパッケージID、公開主体、クラウド同期の要否を確定する。
+3. Capacitorを導入しAndroidプロジェクトを生成する。
+4. SQLiteスキーマとWebスキーマv2からの初回移行を実装する。
+5. ML Kit Barcode Scanning、ネイティブ共有、端末ファイル保存を接続する。
+6. openBD未収録時の書誌フォールバックを決める。
+7. TalkBack、200%文字拡大、5000冊性能、Android実機回帰を追加する。
+8. Play Console内部テスト、クローズドテスト、公開へ進む。
 
 ## 9. 次回開始時チェック
 
