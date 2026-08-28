@@ -172,6 +172,17 @@ h2 { letter-spacing: 0; }
 .settings-title > svg { width: 22px; color: var(--accent); }
 .settings-title h2 { margin: 0 0 5px; font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-size: 21px; }
 .settings-title p { margin: 0; color: var(--muted); font-size: 12px; }
+.install-section { position: relative; overflow: hidden; border-color: color-mix(in srgb, var(--green) 35%, var(--line)); }
+.install-section::after { content: "Y"; position: absolute; top: -46px; right: 15px; color: color-mix(in srgb, var(--green) 6%, transparent); font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-size: 190px; line-height: 1; pointer-events: none; }
+.install-card { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 19px 20px; background: var(--cream); }
+.install-card > div { display: grid; gap: 5px; }
+.install-card strong { font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-size: 17px; }
+.install-card p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.install-action { flex: 0 0 auto; }
+.install-action:disabled { cursor: default; opacity: .65; }
+.install-action:disabled:hover { background: var(--ink); }
+.install-note { position: relative; z-index: 1; display: flex; align-items: flex-start; gap: 8px; margin: 13px 0 0; color: var(--muted); font-size: 10px; line-height: 1.7; }
+.install-note svg { flex: 0 0 auto; width: 15px; margin-top: 1px; color: var(--green); }
 .export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .export-option { min-height: 82px; display: grid; grid-template-columns: 45px 1fr 22px; gap: 13px; align-items: center; padding: 13px; border: 1px solid var(--line); background: var(--bg); text-align: left; border-radius: var(--radius); }
 .export-option:hover { border-color: var(--ink); box-shadow: 3px 3px 0 var(--ink); transform: translate(-1px, -1px); }
@@ -211,8 +222,7 @@ h2 { letter-spacing: 0; }
 .about-brand strong { font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; letter-spacing: .1em; }
 .about-brand span, .about-section p { color: #9ba49e; font-size: 10px; }
 .about-section p { margin: 0; }
-.about-section a { display: inline-flex; align-items: center; gap: 6px; color: #fff; font-size: 11px; text-decoration: none; }
-.about-section a svg { width: 14px; }
+.release-badge { padding: 7px 9px; border: 1px solid #58615b; color: #c8cfca; font-size: 8px; font-weight: 800; letter-spacing: .16em; }
 
 .bottom-nav { display: none; }
 dialog { color: var(--ink); }
@@ -318,6 +328,7 @@ body[data-theme="dark"] .book-cover::after { background:linear-gradient(to top, 
   .header-actions .icon-button { display: none; }
   .primary-button { padding: 0 14px; }
   .primary-button span { display: none; }
+  .install-action span { display: inline; }
   .shelf-overview { padding: 22px; margin-right: -18px; margin-left: -18px; }
   .overview-copy p { font-size: 22px; }
   .mini-bars { height: 84px; }
@@ -355,6 +366,8 @@ body[data-theme="dark"] .book-cover::after { background:linear-gradient(to top, 
   .donut-layout { grid-template-columns: 145px 1fr; gap: 18px; }
   .month-chart { gap: 5px; }
   .settings-section { padding: 23px 18px; margin-right: -4px; margin-left: -4px; }
+  .install-card { align-items: stretch; flex-direction: column; gap: 16px; }
+  .install-action { width: 100%; }
   .export-grid { grid-template-columns: 1fr; }
   .setting-row { align-items: flex-start; flex-direction: column; padding: 16px 0; }
   .setting-row > :last-child { align-self: stretch; }

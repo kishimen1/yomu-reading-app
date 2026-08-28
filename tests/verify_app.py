@@ -138,6 +138,12 @@ def run() -> None:
         page.screenshot(path=str(ARTIFACTS / "mobile-analytics.png"), full_page=True)
 
         page.locator(".bottom-nav [data-nav=settings]").click()
+        assert page.locator("#install-app").is_visible()
+        assert "ホーム画面" in page.locator("#install-status").inner_text()
+        page.locator("#install-app").click()
+        assert "ホーム画面に追加" in page.locator("#toast").inner_text()
+        page.wait_for_timeout(150)
+        page.screenshot(path=str(ARTIFACTS / "mobile-settings-install.png"), full_page=True)
         csv_buffer = io.StringIO(newline="")
         csv_writer = csv.writer(csv_buffer)
         csv_writer.writerow(["灯りのない窓辺", "", "水原 澄", "", "架空出版社", "9784000000001", "2026/01/18", "重複", "", "", "", "2026/01/18", "0", "5"])

@@ -22,6 +22,11 @@ type ShelfView = "grid" | "list";
 type ScreenName = "shelf" | "analytics" | "settings";
 type AddMode = "scan" | "search" | "manual";
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+}
+
 declare global {
   interface Window {
     lucide?: {
@@ -70,6 +75,8 @@ let cameraStream: MediaStream | null = null;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogRequest: AbortController | null = null;
+let deferredInstallPrompt: BeforeInstallPromptEvent | null = null;
+let installCompletedThisSession = false;
 
 function $<T extends Element = HTMLElement>(selector: string, root: ParentNode = document): T {
   const element = root.querySelector<T>(selector);
@@ -111,6 +118,63 @@ function showToast(message: string) {
   toast.classList.add("is-visible");
   if (toastTimer !== null) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2600);
+}
+
+function isInstalled(): boolean {
+  return installCompletedThisSession || window.matchMedia("(display-mode: standalone)").matches;
+}
+
+function updateInstallUI() {
+  const button = $<HTMLButtonElement>("#install-app");
+  const title = $("#install-title");
+  const status = $("#install-status");
+  if (isInstalled()) {
+    title.textContent = "インストール済みです";
+    status.textContent = "ホーム画面またはアプリ一覧からYOMUを起動できます。";
+    button.disabled = true;
+    button.innerHTML = '<i data-lucide="check"></i><span>インストール済み</span>';
+  } else if (deferredInstallPrompt) {
+    title.textContent = "YOMUをインストール";
+    status.textContent = "このブラウザーからすぐにインストールできます。";
+    button.disabled = false;
+  } else {
+    title.textContent = "YOMUをホーム画面へ";
+    status.textContent = "Android版Chromeのメニューから「ホーム画面に追加」も選べます。";
+    button.disabled = false;
+  }
+  iconize();
+}
+
+function initializeInstallExperience() {
+  window.addEventListener("beforeinstallprompt", event => {
+    event.preventDefault();
+    deferredInstallPrompt = event as BeforeInstallPromptEvent;
+    updateInstallUI();
+  });
+  window.addEventListener("appinstalled", () => {
+    installCompletedThisSession = true;
+    deferredInstallPrompt = null;
+    updateInstallUI();
+    showToast("YOMUをインストールしました");
+  });
+  $("#install-app").addEventListener("click", async () => {
+    if (isInstalled()) return;
+    if (!deferredInstallPrompt) {
+      showToast("Chromeのメニューから「ホーム画面に追加」を選んでください");
+      return;
+    }
+    const prompt = deferredInstallPrompt;
+    deferredInstallPrompt = null;
+    try {
+      await prompt.prompt();
+      const choice = await prompt.userChoice;
+      if (choice.outcome === "accepted") showToast("インストールを開始しました");
+    } catch {
+      showToast("ブラウザーのメニューからインストールしてください");
+    }
+    updateInstallUI();
+  });
+  updateInstallUI();
 }
 
 function renderBooks() {
@@ -663,6 +727,7 @@ function initialize() {
   $<HTMLInputElement>("#manual-finished-at").value = localToday;
   applyTheme(settings.theme);
   initializeEvents();
+  initializeInstallExperience();
   renderCatalog("");
   renderAll();
   setTimeout(iconize, 150);

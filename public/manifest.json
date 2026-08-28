@@ -3,6 +3,7 @@
   "short_name": "YOMU",
   "description": "読書記録と読書傾向の可視化を一つにまとめるAndroid対応アプリ",
   "lang": "ja",
+  "categories": ["books", "productivity"],
   "id": "./",
   "start_url": "./index.html",
   "scope": "./",

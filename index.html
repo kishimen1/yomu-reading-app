@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f4f6f3">
-  <meta name="description" content="読書記録と読書傾向を一つにまとめるAndroid対応PWAモックアップ">
+  <meta name="description" content="読書記録と読書傾向を一つにまとめる、端末保存型のAndroid対応PWA">
   <title>YOMU - 読書の記録と分析</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" type="image/png" sizes="192x192" href="/assets/app-icon-192.png">
@@ -157,6 +157,17 @@
           <div><p class="eyebrow">DATA & PREFERENCES</p><h1 id="settings-title">設定</h1></div>
         </header>
         <div class="settings-layout">
+          <section class="settings-section install-section">
+            <div class="settings-title"><i data-lucide="smartphone"></i><div><h2>この端末で使う</h2><p>ホーム画面から、通常のアプリのように起動できます。</p></div></div>
+            <div class="install-card">
+              <div>
+                <strong id="install-title">YOMUをインストール</strong>
+                <p id="install-status" role="status" aria-live="polite">対応ブラウザーでインストールできます。</p>
+              </div>
+              <button class="primary-button install-action" id="install-app" type="button"><i data-lucide="download"></i><span>この端末にインストール</span></button>
+            </div>
+            <p class="install-note"><i data-lucide="hard-drive"></i>読書記録はこの端末のブラウザー内に保存されます。機種変更やブラウザーデータ削除の前に、JSONバックアップを保存してください。</p>
+          </section>
           <section class="settings-section">
             <div class="settings-title"><i data-lucide="database"></i><div><h2>データ管理</h2><p>記録はこの端末内に保存されています。</p></div></div>
             <div class="export-grid">
@@ -168,7 +179,7 @@
               <input id="import-csv-file" type="file" accept="text/csv,.csv" hidden>
             </div>
             <div class="import-summary" id="import-summary" role="status" aria-live="polite" hidden></div>
-            <div class="data-note"><i data-lucide="shield-check"></i><p><strong>プライバシーファースト</strong><br>モックではアカウント登録や外部送信を行いません。本稼働版では暗号化同期を選択式で提供します。</p></div>
+            <div class="data-note"><i data-lucide="shield-check"></i><p><strong>プライバシーファースト</strong><br>読書記録は端末内に保存され、アカウント登録やクラウド同期は行いません。ISBN検索時だけ、入力したISBNをopenBDへ送信します。</p></div>
           </section>
           <section class="settings-section">
             <div class="settings-title"><i data-lucide="sliders-horizontal"></i><div><h2>表示と記録</h2><p>日々の記録方法を調整します。</p></div></div>
@@ -177,9 +188,9 @@
             <label class="setting-row"><div><strong>あらすじをメモに追加</strong><span>書誌取得時に自動入力</span></div><input class="switch" type="checkbox" id="synopsis-toggle" checked></label>
           </section>
           <section class="settings-section about-section">
-            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>Prototype 0.2.0</span></div></div>
+            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>PWA 0.3.0</span></div></div>
             <p>読書の記憶を、あとから読み解ける記録へ。</p>
-            <a href="README.md" target="_blank">開発ロードマップ <i data-lucide="external-link"></i></a>
+            <span class="release-badge">PUBLIC PREVIEW</span>
           </section>
         </div>
       </section>

@@ -36,6 +36,8 @@ Git:
 - ライト／ダーク表示、年間目標設定
 - 192x192／512x512 PWAアイコン、manifest `id`
 - Service Workerによる同一オリジンのオフラインキャッシュ
+- GitHub Pages用の自動ビルド・HTTPS公開ワークフロー
+- 設定画面からのPWAインストール導線と端末保存の注意表示
 
 ## 3. 技術構成
 
@@ -48,7 +50,8 @@ Git:
 | `src/openbd.ts` | ISBN検証、openBD API接続、応答変換 |
 | `src/styles.css` | モバイル／タブレット／デスクトップUI |
 | `public/manifest.json` | PWAマニフェスト |
-| `public/sw.js` | オフラインキャッシュ。現在 `yomu-shell-v4` |
+| `public/sw.js` | オフラインキャッシュ。現在 `yomu-shell-v5` |
+| `.github/workflows/deploy-pages.yml` | `main` push時のGitHub Pages自動公開 |
 | `tests/verify_app.py` | Vite本番プレビューを使うPlaywright回帰テスト |
 | `package.json` | Vite、TypeScript、ビルド／テストコマンド |
 
@@ -133,7 +136,7 @@ openBD:
 
 ## 7. 既知の制約
 
-- HTTPS公開先は未決定・未公開。
+- GitHub Pages向け設定は実装済みだが、GitHubリモート未設定のため未公開。
 - AndroidパッケージIDが未決定のためCapacitorプロジェクトは未生成。
 - ISBN画像認識は未接続。カメラプレビューとサンプル読取まで。
 - 端末DBはlocalStorage。SQLite、全文検索、DBマイグレーションは未実装。
@@ -143,14 +146,15 @@ openBD:
 
 ## 8. 次の推奨作業（優先順）
 
-1. HTTPSプレビュー公開先を決め、学内Wi-FiのAndroid実機でPWAインストール・カメラ・オフラインを確認する。
-2. 正式アプリ名、AndroidパッケージID、公開主体、クラウド同期の要否を確定する。
-3. Capacitorを導入しAndroidプロジェクトを生成する。
-4. SQLiteスキーマとWebスキーマv2からの初回移行を実装する。
-5. ML Kit Barcode Scanning、ネイティブ共有、端末ファイル保存を接続する。
-6. openBD未収録時の書誌フォールバックを決める。
-7. TalkBack、200%文字拡大、5000冊性能、Android実機回帰を追加する。
-8. Play Console内部テスト、クローズドテスト、公開へ進む。
+1. GitHubリポジトリを作成してpushし、PagesのSourceをGitHub ActionsにしてHTTPS公開する。
+2. 学内Wi-FiのAndroid実機でPWAインストール・カメラ・オフラインを確認する。
+3. 正式アプリ名、AndroidパッケージID、公開主体、クラウド同期の要否を確定する。
+4. Capacitorを導入しAndroidプロジェクトを生成する。
+5. SQLiteスキーマとWebスキーマv2からの初回移行を実装する。
+6. ML Kit Barcode Scanning、ネイティブ共有、端末ファイル保存を接続する。
+7. openBD未収録時の書誌フォールバックを決める。
+8. TalkBack、200%文字拡大、5000冊性能、Android実機回帰を追加する。
+9. Play Console内部テスト、クローズドテスト、公開へ進む。
 
 ## 9. 次回開始時チェック
 
