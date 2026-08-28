@@ -4,8 +4,30 @@ export const SETTINGS_STORAGE_KEY = "yomu-settings:v2";
 
 const LEGACY_LIBRARY_KEYS = ["yomu-reading-archive:v1"];
 const LEGACY_SETTINGS_KEYS = ["yomu-settings:v1"];
+const LEGACY_DEMO_CLEANUP_KEY = "yomu-demo-library-cleanup:v1";
 const BOOK_STATUSES = ["read", "reading", "wishlist"] as const;
 const THEME_PREFERENCES = ["system", "light", "dark"] as const;
+
+const LEGACY_DEMO_BOOKS = new Map([
+  ["b01", "灯りのない窓辺"],
+  ["b02", "葉脈から読む世界"],
+  ["b03", "小さな組織の設計図"],
+  ["b04", "青の列島史"],
+  ["b05", "他者を想像する"],
+  ["b06", "海岸線をゆく列車"],
+  ["b07", "夜の標本室"],
+  ["b08", "森のネットワーク"],
+  ["b09", "余白の経営"],
+  ["b10", "水路と都市の記憶"],
+  ["b11", "静かな対話の技術"],
+  ["b12", "島々の朝食"],
+  ["b13", "透明な時間"],
+  ["b14", "都市の昆虫地図"],
+  ["b15", "文化をつくる会議"],
+  ["b16", "近代港湾の歩き方"],
+  ["b17", "選択の心理学"],
+  ["b18", "北緯35度の旅"],
+]);
 
 export type BookStatus = typeof BOOK_STATUSES[number];
 export type ThemePreference = typeof THEME_PREFERENCES[number];
@@ -146,20 +168,29 @@ function migrateLibrary(value: unknown): LibraryEnvelope {
   };
 }
 
-export function loadBooks(seedBooks: Book[], storage: Storage = localStorage): Book[] {
+function removeLegacyDemoBooks(books: Book[], storage: Storage): Book[] {
+  if (storage.getItem(LEGACY_DEMO_CLEANUP_KEY)) return books;
+  const cleaned = books.filter(book => LEGACY_DEMO_BOOKS.get(book.id) !== book.title);
+  storage.setItem(LEGACY_DEMO_CLEANUP_KEY, "1");
+  return cleaned;
+}
+
+export function loadBooks(storage: Storage = localStorage): Book[] {
   for (const key of [LIBRARY_STORAGE_KEY, ...LEGACY_LIBRARY_KEYS]) {
     const raw = storage.getItem(key);
     if (!raw) continue;
     try {
       const envelope = migrateLibrary(JSON.parse(raw) as unknown);
-      storage.setItem(LIBRARY_STORAGE_KEY, JSON.stringify(envelope));
-      return envelope.books;
+      const books = removeLegacyDemoBooks(envelope.books, storage);
+      saveBooks(books, storage);
+      return books;
     } catch {
       // Keep trying older keys without deleting the unreadable source data.
     }
   }
 
-  const books = structuredClone(seedBooks);
+  const books: Book[] = [];
+  storage.setItem(LEGACY_DEMO_CLEANUP_KEY, "1");
   saveBooks(books, storage);
   return books;
 }

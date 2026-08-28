@@ -16,11 +16,11 @@ import {
   type ThemePreference,
 } from "./data";
 import { hasDuplicateBook, mergeImportedBooks, parseBooksCsv } from "./csv";
-import { fetchOpenBdBook, isValidIsbn } from "./openbd";
+import { fetchOpenBdBook, isValidIsbn, normalizeIsbn } from "./openbd";
 
 type ShelfView = "grid" | "list";
 type ScreenName = "shelf" | "analytics" | "settings";
-type AddMode = "scan" | "search" | "manual";
+type AddMode = "search" | "manual";
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -37,41 +37,12 @@ declare global {
 
 const COVER_POSITIONS = ["0% 0%", "50% 0%", "100% 0%", "0% 100%", "50% 100%", "100% 100%"]; 
 const GENRE_COLORS = ["#256b54", "#e4513b", "#456a82", "#c3912f", "#7b657f", "#88908b"];
-
-const seedBooks: Book[] = [
-  { id: "b01", title: "灯りのない窓辺", author: "水原 澄", isbn: "9784000000001", genre: "文学・小説", pages: 288, status: "read", rating: 5, finishedAt: "2026-01-18", createdAt: "2026-01-18", notes: "静かな文章の間に、家族の時間が折り重なる。", review: "余白まで味わいたくなる作品だった。", cover: 0 },
-  { id: "b02", title: "葉脈から読む世界", author: "朝倉 透", isbn: "9784000000002", genre: "自然科学", pages: 336, status: "read", rating: 5, finishedAt: "2026-02-09", createdAt: "2026-02-09", notes: "植物の形は環境への応答の蓄積。", review: "図版と説明のバランスがよく、再読したい。", cover: 1 },
-  { id: "b03", title: "小さな組織の設計図", author: "高城 真", isbn: "9784000000003", genre: "ビジネス", pages: 254, status: "read", rating: 4, finishedAt: "2026-03-22", createdAt: "2026-03-22", notes: "意思決定の速度は権限の置き方で変わる。", review: "実務に持ち帰れる論点が多い。", cover: 2 },
-  { id: "b04", title: "青の列島史", author: "相川 遼", isbn: "9784000000004", genre: "歴史", pages: 412, status: "read", rating: 4, finishedAt: "2026-04-06", createdAt: "2026-04-06", notes: "海上交通から列島のつながりを捉え直す。", review: "視点が新鮮。地図を見ながら読むと楽しい。", cover: 3 },
-  { id: "b05", title: "他者を想像する", author: "柊木 直", isbn: "9784000000005", genre: "心理・思想", pages: 320, status: "read", rating: 4, finishedAt: "2026-04-27", createdAt: "2026-04-27", notes: "理解とは一致することではない。", review: "対話について考え直すきっかけになった。", cover: 4 },
-  { id: "b06", title: "海岸線をゆく列車", author: "宮沢 碧", isbn: "9784000000006", genre: "紀行・エッセイ", pages: 224, status: "read", rating: 3, finishedAt: "2026-05-15", createdAt: "2026-05-15", notes: "土地の記憶を車窓の速度でたどる。", review: "短い章ごとに旅の温度が変わる。", cover: 5 },
-  { id: "b07", title: "夜の標本室", author: "水原 澄", isbn: "9784000000007", genre: "文学・小説", pages: 301, status: "read", rating: 5, finishedAt: "2026-06-03", createdAt: "2026-06-03", notes: "記憶を保存することと忘れること。", review: "今年いちばん印象に残った小説。", cover: 0 },
-  { id: "b08", title: "森のネットワーク", author: "芦田 葵", isbn: "9784000000008", genre: "自然科学", pages: 376, status: "read", rating: 5, finishedAt: "2026-06-20", createdAt: "2026-06-20", notes: "菌根菌を介した資源交換の仕組み。", review: "複雑な生態系を丁寧にほどいている。", cover: 1 },
-  { id: "b09", title: "余白の経営", author: "三崎 修", isbn: "9784000000009", genre: "ビジネス", pages: 272, status: "read", rating: 3, finishedAt: "2026-07-07", createdAt: "2026-07-07", notes: "計画に余白を組み込む。", review: "後半の事例が特に参考になった。", cover: 2 },
-  { id: "b10", title: "水路と都市の記憶", author: "相川 遼", isbn: "9784000000010", genre: "歴史", pages: 348, status: "read", rating: 4, finishedAt: "2026-08-02", createdAt: "2026-08-02", notes: "都市の骨格は見えない水路に残る。", review: "身近な街の見え方が変わった。", cover: 3 },
-  { id: "b11", title: "静かな対話の技術", author: "柊木 直", isbn: "9784000000011", genre: "心理・思想", pages: 264, status: "read", rating: 4, finishedAt: "2026-08-14", createdAt: "2026-08-14", notes: "問いを急いで閉じない。", review: "会議や面談でも応用できそう。", cover: 4 },
-  { id: "b12", title: "島々の朝食", author: "宮沢 碧", isbn: "9784000000012", genre: "紀行・エッセイ", pages: 246, status: "read", rating: 4, finishedAt: "2026-08-26", createdAt: "2026-08-26", notes: "食卓から気候と産業が見えてくる。", review: "旅に出たくなる、軽やかな読後感。", cover: 5 },
-  { id: "b13", title: "透明な時間", author: "遠野 翠", isbn: "9784000000013", genre: "文学・小説", pages: 390, status: "reading", rating: 0, finishedAt: "", createdAt: "2026-08-21", notes: "p.84 時間の感覚について", review: "", cover: 0 },
-  { id: "b14", title: "都市の昆虫地図", author: "芦田 葵", isbn: "9784000000014", genre: "自然科学", pages: 298, status: "reading", rating: 0, finishedAt: "", createdAt: "2026-08-24", notes: "", review: "", cover: 1 },
-  { id: "b15", title: "文化をつくる会議", author: "高城 真", isbn: "9784000000015", genre: "ビジネス", pages: 230, status: "wishlist", rating: 0, finishedAt: "", createdAt: "2026-07-02", notes: "", review: "", cover: 2 },
-  { id: "b16", title: "近代港湾の歩き方", author: "相川 遼", isbn: "9784000000016", genre: "歴史", pages: 310, status: "wishlist", rating: 0, finishedAt: "", createdAt: "2026-07-18", notes: "", review: "", cover: 3 },
-  { id: "b17", title: "選択の心理学", author: "柊木 直", isbn: "9784000000017", genre: "心理・思想", pages: 286, status: "wishlist", rating: 0, finishedAt: "", createdAt: "2026-08-05", notes: "", review: "", cover: 4 },
-  { id: "b18", title: "北緯35度の旅", author: "宮沢 碧", isbn: "9784000000018", genre: "紀行・エッセイ", pages: 208, status: "wishlist", rating: 0, finishedAt: "", createdAt: "2026-08-19", notes: "", review: "", cover: 5 }
-];
-
-const catalogBooks: CatalogBook[] = [
-  { title: "風を集める図書館", author: "遠野 翠", isbn: "9784100000201", genre: "文学・小説", pages: 312, cover: 0, source: "catalog" },
-  { title: "土と微生物の教科書", author: "芦田 葵", isbn: "9784100000202", genre: "自然科学", pages: 344, cover: 1, source: "catalog" },
-  { title: "問いから始める戦略", author: "三崎 修", isbn: "9784100000203", genre: "ビジネス", pages: 268, cover: 2, source: "catalog" }
-];
-
-let visibleCatalogBooks = catalogBooks;
-let books = loadBooks(seedBooks);
+let visibleCatalogBooks: CatalogBook[] = [];
+let books = loadBooks();
 let settings = loadSettings();
 let activeFilter: BookStatus = "read";
 let activeView: ShelfView = "grid";
 let query = "";
-let cameraStream: MediaStream | null = null;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogRequest: AbortController | null = null;
@@ -204,11 +175,40 @@ function renderBooks() {
       </div>
     </article>`).join("");
 
-  $("#empty-state").hidden = filtered.length > 0;
+  renderEmptyState(filtered.length);
   grid.hidden = filtered.length === 0;
   $("#read-count").textContent = String(books.filter(book => book.status === "read").length);
   $("#reading-count").textContent = String(books.filter(book => book.status === "reading").length);
   $("#wishlist-count").textContent = String(books.filter(book => book.status === "wishlist").length);
+}
+
+function renderEmptyState(resultCount: number) {
+  const empty = $("#empty-state");
+  empty.hidden = resultCount > 0;
+  if (resultCount > 0) return;
+
+  const hasQuery = query.trim().length > 0;
+  const isFirstBook = books.length === 0;
+  const title = $("#empty-title");
+  const copy = $("#empty-copy");
+  const clearButton = $("#empty-clear-search");
+  clearButton.hidden = !hasQuery;
+
+  if (isFirstBook) {
+    empty.classList.add("is-first-book");
+    title.textContent = "最初の一冊から、あなたの本棚へ";
+    copy.textContent = "ISBNから書誌情報を取得するか、手入力で読書記録を始められます。記録はこの端末だけに保存されます。";
+    return;
+  }
+
+  empty.classList.remove("is-first-book");
+  if (hasQuery) {
+    title.textContent = "検索結果がありません";
+    copy.textContent = "検索語を変えるか、条件をクリアしてください。";
+    return;
+  }
+  title.textContent = `${statusLabel(activeFilter)}の本はまだありません`;
+  copy.textContent = "別の本棚へ切り替えるか、新しい本を追加してください。";
 }
 
 function syncAnalyticsYearOptions() {
@@ -245,7 +245,9 @@ function renderReadingPulse(allReadBooks: Book[], now: Date) {
   const current = points.at(-1)?.count ?? 0;
   const previous = points.at(-2)?.count ?? 0;
   $("#month-count").textContent = `${current}冊`;
-  $("#pace-copy").textContent = current === previous
+  $("#pace-copy").textContent = allReadBooks.length === 0
+    ? "最初の読了記録を追加してみましょう。"
+    : current === previous
     ? "先月と同じペースです。"
     : `先月より${Math.abs(current - previous)}冊${current > previous ? "多い" : "少ない"}ペースです。`;
 }
@@ -281,6 +283,21 @@ function renderAnalytics() {
   $("#kpi-authors").textContent = String(uniqueAuthors);
   renderReadingPulse(allReadBooks, now);
 
+  const comparison = $("#analytics-comparison");
+  if (selectedYear === null) {
+    comparison.innerHTML = `<i data-lucide="library-big"></i> 全期間の読了記録`;
+  } else if (!readBooks.length) {
+    comparison.innerHTML = `<i data-lucide="book-open"></i> 読了日を入れた本が集計されます`;
+  } else {
+    const throughMonth = selectedYear === currentYear ? currentMonth : 12;
+    const previousYearCount = allReadBooks.filter(book => Number(book.finishedAt.slice(0, 4)) === selectedYear - 1 && Number(book.finishedAt.slice(5, 7)) <= throughMonth).length;
+    const difference = readBooks.length - previousYearCount;
+    const icon = difference > 0 ? "trending-up" : difference < 0 ? "trending-down" : "minus";
+    comparison.innerHTML = previousYearCount
+      ? `<i data-lucide="${icon}"></i> 前年同期より <strong>${Math.abs(difference)}冊</strong> ${difference > 0 ? "多い" : difference < 0 ? "少ない" : "同じ"}`
+      : `<i data-lucide="bookmark-check"></i> ${selectedYear}年の読了記録`;
+  }
+
   const genreCounts = readBooks.reduce<Record<string, number>>((acc, book) => {
     acc[book.genre] = (acc[book.genre] || 0) + 1;
     return acc;
@@ -294,18 +311,53 @@ function renderAnalytics() {
   }).join(", ");
   $("#genre-donut").style.background = `conic-gradient(${stops || "#d7ddd8 0 100%"})`;
   $("#genre-donut").innerHTML = `<div><strong>${genres.length}</strong><span>ジャンル</span></div>`;
-  $("#genre-legend").innerHTML = genres.map(([genre, count], index) => `
-    <div class="legend-row"><i style="background:${GENRE_COLORS[index % GENRE_COLORS.length]}"></i><span>${escapeHtml(genre)}</span><strong>${Math.round(count / readBooks.length * 100)}%</strong></div>`).join("");
+  $("#genre-legend").innerHTML = genres.length
+    ? genres.map(([genre, count], index) => `
+      <div class="legend-row"><i style="background:${GENRE_COLORS[index % GENRE_COLORS.length]}"></i><span>${escapeHtml(genre)}</span><strong>${Math.round(count / readBooks.length * 100)}%</strong></div>`).join("")
+    : `<p class="analytics-empty">読了記録が増えると、ジャンルの割合が表示されます。</p>`;
+
+  $("#analytics-summary").textContent = !readBooks.length
+    ? "本を読み終えたら、読了日を記録してみましょう。"
+    : genres.length === 1
+      ? `「${genres[0][0]}」が、この期間の読書を形づくっています。`
+      : `「${genres[0][0]}」と「${genres[1][0]}」が、この期間の読書を形づくっています。`;
 
   const maxMonth = Math.max(...monthly, 1);
   $("#month-chart").setAttribute("aria-label", `${selectedYear ?? "全期間"}の月別読了冊数`);
   $("#month-chart").innerHTML = monthly.map((count, index) => `
     <div class="month-bar ${selectedYear === currentYear && index === currentMonth - 1 ? "current" : ""}"><strong>${count || ""}</strong><i style="--height:${Math.max(count / maxMonth * 82, count ? 20 : 3)}%"></i><span>${index + 1}月</span></div>`).join("");
+  $("#trend-signal").innerHTML = readBooks.length
+    ? `<i data-lucide="activity"></i> ${readBooks.length}冊を集計`
+    : `<i data-lucide="minus"></i> 記録なし`;
 
   const ratingCounts = [5, 4, 3, 2, 1].map(rating => ({ rating, count: rated.filter(book => book.rating === rating).length }));
   const maxRating = Math.max(...ratingCounts.map(item => item.count), 1);
   $("#rating-bars").innerHTML = ratingCounts.map(item => `
     <div class="rating-row"><strong>${item.rating}.0</strong><div class="rating-track"><i style="width:${item.count / maxRating * 100}%"></i></div><span>${item.count}</span></div>`).join("");
+
+  const insightTitle = $("#insight-title");
+  const insightCopy = $("#insight-copy");
+  const insightButton = $("#show-insight-books");
+  if (!readBooks.length) {
+    insightTitle.textContent = "記録から見えてくること";
+    insightCopy.textContent = "読了記録が増えると、よく読むジャンルや満足度の高い領域が見えてきます。";
+    insightButton.dataset.insightGenre = "";
+    insightButton.innerHTML = `最初の本を追加する <i data-lucide="arrow-right"></i>`;
+  } else {
+    const ratedByGenre = new Map<string, number[]>();
+    rated.forEach(book => ratedByGenre.set(book.genre, [...(ratedByGenre.get(book.genre) || []), book.rating]));
+    const highestRated = [...ratedByGenre.entries()]
+      .map(([genre, ratings]) => ({ genre, average: ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length }))
+      .sort((a, b) => b.average - a.average)[0];
+    const insightGenre = highestRated?.genre || genres[0]?.[0] || "その他";
+    insightTitle.textContent = highestRated ? "満足度の高いジャンル" : "よく読むジャンル";
+    insightCopy.innerHTML = highestRated
+      ? `「${escapeHtml(insightGenre)}」の平均評価は <strong>${highestRated.average.toFixed(1)}</strong>。この期間で満足度の高い領域です。`
+      : `「${escapeHtml(insightGenre)}」を最も多く読んでいます。評価を付けると、満足度も比較できます。`;
+    insightButton.dataset.insightGenre = insightGenre;
+    insightButton.innerHTML = `該当する本を見る <i data-lucide="arrow-right"></i>`;
+  }
+  iconize();
 }
 
 function renderAll() {
@@ -332,36 +384,34 @@ function setFilter(filter: BookStatus) {
   renderBooks();
 }
 
-function openAddDialog(mode: AddMode = "scan") {
+function openAddDialog(mode: AddMode = "search") {
   setAddMode(mode);
   $<HTMLDialogElement>("#add-dialog").showModal();
+  if (mode === "search") window.setTimeout(() => $<HTMLInputElement>("#catalog-search").focus(), 50);
+  if (mode === "manual") window.setTimeout(() => $<HTMLInputElement>("#manual-form [name=title]").focus(), 50);
 }
 
 function closeDialog(id: string) {
   const dialog = document.getElementById(id) as HTMLDialogElement | null;
   if (dialog?.open) dialog.close();
-  if (id === "add-dialog") stopCamera();
 }
 
 function setAddMode(mode: AddMode) {
   $$('[data-add-mode]').forEach(button => button.classList.toggle("is-active", button.dataset.addMode === mode));
   $$('[data-add-view]').forEach(view => view.classList.toggle("is-active", view.dataset.addView === mode));
-  if (mode === "search") renderCatalog("");
+  if (mode === "search" && !$<HTMLInputElement>("#catalog-search").value) {
+    visibleCatalogBooks = [];
+    renderCatalogResults([], "ISBNを入力すると、openBDから書誌情報を取得します。");
+  }
 }
 
-function renderCatalog(searchTerm: string) {
-  const term = searchTerm.trim().toLocaleLowerCase("ja");
-  visibleCatalogBooks = catalogBooks.filter(book => `${book.title} ${book.author} ${book.isbn}`.toLocaleLowerCase("ja").includes(term));
-  renderCatalogResults(visibleCatalogBooks);
-}
-
-function renderCatalogResults(results: CatalogBook[]) {
+function renderCatalogResults(results: CatalogBook[], emptyMessage = "書誌情報が見つかりませんでした。手入力で登録できます。") {
   $("#catalog-results").innerHTML = results.map(book => `
     <article class="catalog-result">
       <div class="result-cover" style="--cover-position:${COVER_POSITIONS[book.cover]}">${book.coverUrl ? `<img src="${escapeHtml(book.coverUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}</div>
       <span><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)}${book.publisher ? ` · ${escapeHtml(book.publisher)}` : ""}<br>ISBN ${escapeHtml(book.isbn)}</small></span>
       <button type="button" data-catalog-isbn="${book.isbn}" aria-label="${escapeHtml(book.title)}を追加"><i data-lucide="plus"></i></button>
-    </article>`).join("") || `<p class="empty-state">候補が見つかりませんでした。</p>`;
+    </article>`).join("") || `<p class="catalog-empty">${escapeHtml(emptyMessage)}</p>`;
   iconize();
 }
 
@@ -371,17 +421,18 @@ async function searchCatalog(searchTerm: string) {
   catalogRequest = null;
 
   if (!isValidIsbn(term)) {
-    renderCatalog(term);
+    visibleCatalogBooks = [];
+    renderCatalogResults([], term ? "ISBN-10またはISBN-13の数字を確認してください。" : "ISBNを入力すると、openBDから書誌情報を取得します。");
     $("#catalog-source").textContent = term
-      ? "書名・著者は端末内のデモ候補を検索しています。実書誌はISBNで検索できます。"
-      : "ISBN-10／ISBN-13はopenBD、書名・著者は端末内のデモ候補を検索します。";
+      ? "ハイフンは入っていても構いません。ISBNのチェック数字まで入力してください。"
+      : "ISBN検索はopenBDを利用します。未収録の場合は手入力で登録できます。";
     return;
   }
 
   const request = new AbortController();
   catalogRequest = request;
   $("#catalog-source").textContent = "openBDから書誌情報を取得しています…";
-  $("#catalog-results").innerHTML = `<p class="empty-state">書誌情報を検索中です。</p>`;
+  $("#catalog-results").innerHTML = `<p class="catalog-empty">書誌情報を検索中です。</p>`;
 
   try {
     const result = await fetchOpenBdBook(term, request.signal);
@@ -392,7 +443,7 @@ async function searchCatalog(searchTerm: string) {
   } catch (error) {
     if (request.signal.aborted) return;
     visibleCatalogBooks = [];
-    renderCatalogResults([]);
+    renderCatalogResults([], "書誌情報を取得できませんでした。手入力で登録できます。");
     $("#catalog-source").textContent = error instanceof Error ? error.message : "openBDの書誌情報を取得できませんでした。";
   } finally {
     if (catalogRequest === request) catalogRequest = null;
@@ -406,7 +457,9 @@ function scheduleCatalogSearch(searchTerm: string) {
 
 function addCatalogBook(catalogBook: CatalogBook, source = "検索") {
   const now = todayIso();
-  const candidate: Book = { ...catalogBook, id: crypto.randomUUID(), status: "wishlist", rating: 0, finishedAt: "", createdAt: now, notes: settings.synopsis ? catalogBook.synopsis || (catalogBook.source === "catalog" ? "書誌情報から取得したあらすじ（モック）" : "") : "", review: "" };
+  const selectedStatus = $<HTMLSelectElement>("#catalog-status").value;
+  const status: BookStatus = isBookStatus(selectedStatus) ? selectedStatus : "read";
+  const candidate: Book = { ...catalogBook, id: crypto.randomUUID(), status, rating: 0, finishedAt: status === "read" ? now : "", createdAt: now, notes: settings.synopsis ? catalogBook.synopsis || "" : "", review: "" };
   if (hasDuplicateBook(books, candidate)) {
     showToast(`「${catalogBook.title}」はすでに本棚にあります`);
     return;
@@ -414,47 +467,15 @@ function addCatalogBook(catalogBook: CatalogBook, source = "検索") {
   books.unshift(candidate);
   persist();
   renderAll();
-  showToast(`${source}から「${catalogBook.title}」を読みたい本に追加しました`);
-}
-
-async function startCamera() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    showToast("このブラウザーではカメラを利用できません");
-    return;
-  }
-  try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
-    const video = $<HTMLVideoElement>("#camera-preview");
-    video.srcObject = cameraStream;
-    video.hidden = false;
-    await video.play();
-    showToast("カメラを起動しました。モックではサンプル読取で登録を試せます");
-  } catch {
-    showToast("カメラ権限がありません。サンプル読取は利用できます");
-  }
-}
-
-function stopCamera() {
-  cameraStream?.getTracks().forEach(track => track.stop());
-  cameraStream = null;
-  const video = $<HTMLVideoElement>("#camera-preview");
-  video.srcObject = null;
-  video.hidden = true;
-}
-
-function showScanResult() {
-  const book = catalogBooks[1];
-  const result = $("#scan-result");
-  result.hidden = false;
-  result.innerHTML = `<div class="result-cover" style="--cover-position:${COVER_POSITIONS[book.cover]}"></div><span><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)} · ${book.isbn}</small></span><button type="button" id="add-scan-result" aria-label="読み取った本を追加"><i data-lucide="plus"></i></button>`;
-  iconize();
+  closeDialog("add-dialog");
+  showToast(`${source}から「${catalogBook.title}」を${statusLabel(status)}の本に追加しました`);
 }
 
 function openBookDetail(id: string) {
   const book = books.find(item => item.id === id);
   if (!book) return;
   $("#detail-content").innerHTML = `
-    <form class="detail-layout" id="detail-form" data-book-id="${escapeHtml(book.id)}">
+    <form class="detail-layout" id="detail-form" data-book-id="${escapeHtml(book.id)}" data-rating="${book.rating}">
       <div class="detail-cover-panel"><div class="detail-cover" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">${book.coverUrl ? `<img src="${escapeHtml(book.coverUrl)}" alt="" referrerpolicy="no-referrer">` : ""}</div></div>
       <div class="detail-form">
         <span class="section-kicker">BOOK RECORD</span>
@@ -468,6 +489,12 @@ function openBookDetail(id: string) {
         <div class="detail-fields">
           <label class="field"><span>タイトル</span><input name="title" value="${escapeHtml(book.title)}" required maxlength="500"></label>
           <label class="field"><span>著者</span><input name="author" value="${escapeHtml(book.author)}" required maxlength="300"></label>
+          <div class="detail-metadata-grid">
+            <label class="field"><span>ISBN</span><input name="isbn" value="${escapeHtml(book.isbn)}" maxlength="30" inputmode="text" placeholder="ISBN-10 / ISBN-13"></label>
+            <label class="field"><span>ジャンル</span><input name="genre" value="${escapeHtml(book.genre)}" list="genre-options" maxlength="100"></label>
+            <label class="field"><span>ページ数</span><input name="pages" type="number" min="0" max="100000" inputmode="numeric" value="${book.pages || ""}"></label>
+            <label class="field"><span>出版社</span><input name="publisher" value="${escapeHtml(book.publisher || "")}" maxlength="300"></label>
+          </div>
           <label class="field"><span>本棚</span><select name="status"><option value="read" ${book.status === "read" ? "selected" : ""}>読んだ</option><option value="reading" ${book.status === "reading" ? "selected" : ""}>読書中</option><option value="wishlist" ${book.status === "wishlist" ? "selected" : ""}>読みたい</option></select></label>
           <label class="field"><span>読了日</span><input name="finishedAt" type="date" value="${escapeHtml(book.finishedAt || "")}"></label>
           <label class="field"><span>メモ</span><textarea name="notes" maxlength="50000" placeholder="引用やページ番号、気づきを記録">${escapeHtml(book.notes || "")}</textarea></label>
@@ -481,18 +508,35 @@ function openBookDetail(id: string) {
 }
 
 function saveBookDetail(form: HTMLFormElement) {
-  if (!form.reportValidity()) return;
   const book = books.find(item => item.id === form.dataset.bookId);
   if (!book) return;
   const formData = new FormData(form);
-  book.title = String(formData.get("title") || "").trim();
-  book.author = String(formData.get("author") || "").trim();
+  const isbnInput = $<HTMLInputElement>('[name="isbn"]', form);
+  const rawIsbn = String(formData.get("isbn") || "").trim();
+  isbnInput.setCustomValidity(rawIsbn && !isValidIsbn(rawIsbn) ? "ISBN-10またはISBN-13を確認してください" : "");
+  if (!form.reportValidity()) return;
   const status = String(formData.get("status"));
-  book.status = isBookStatus(status) ? status : "read";
-  book.finishedAt = String(formData.get("finishedAt") || "");
-  book.notes = String(formData.get("notes") || "");
-  book.review = String(formData.get("review") || "");
-  if (book.status === "read" && !book.finishedAt) book.finishedAt = todayIso();
+  const nextStatus: BookStatus = isBookStatus(status) ? status : "read";
+  const candidate = normalizeBook({
+    ...book,
+    title: formData.get("title"),
+    author: formData.get("author"),
+    isbn: rawIsbn ? normalizeIsbn(rawIsbn) : "",
+    genre: formData.get("genre"),
+    pages: formData.get("pages"),
+    publisher: formData.get("publisher"),
+    status: nextStatus,
+    rating: Number(form.dataset.rating || 0),
+    finishedAt: nextStatus === "read" ? String(formData.get("finishedAt") || todayIso()) : "",
+    notes: formData.get("notes"),
+    review: formData.get("review"),
+  });
+  if (!candidate) return;
+  if (hasDuplicateBook(books.filter(item => item.id !== book.id), candidate)) {
+    showToast("同じISBN、または同じ書名と著者の本がすでにあります");
+    return;
+  }
+  Object.assign(book, candidate, { id: book.id, createdAt: book.createdAt });
   persist();
   renderAll();
   closeDialog("detail-dialog");
@@ -626,7 +670,7 @@ function initializeEvents() {
       renderBooks();
     }
 
-    const bookButton = target.closest<HTMLElement>("[data-book-id]");
+    const bookButton = target.closest<HTMLButtonElement>("button[data-book-id]");
     if (bookButton?.dataset.bookId) openBookDetail(bookButton.dataset.bookId);
 
     const addMode = target.closest<HTMLElement>("[data-add-mode]");
@@ -638,12 +682,14 @@ function initializeEvents() {
       if (book) addCatalogBook(book, book.source === "openbd" ? "openBD" : "検索");
     }
 
-    const ratingButton = target.closest<HTMLElement>("[data-rating]");
+    const ratingButton = target.closest<HTMLElement>(".rating-control [data-rating]");
     if (ratingButton) {
       const rating = Number(ratingButton.dataset.rating);
-      const book = books.find(item => item.id === $("#detail-form").dataset.bookId);
-      if (book) book.rating = book.rating === rating ? 0 : rating;
-      $$("[data-rating]").forEach(button => button.classList.toggle("is-active", Number(button.dataset.rating) <= (book?.rating || 0)));
+      const form = ratingButton.closest<HTMLFormElement>("#detail-form");
+      if (!form) return;
+      const nextRating = Number(form.dataset.rating || 0) === rating ? 0 : rating;
+      form.dataset.rating = String(nextRating);
+      $$(".rating-control [data-rating]", form).forEach(button => button.classList.toggle("is-active", Number(button.dataset.rating) <= nextRating));
     }
 
     const themeButton = target.closest<HTMLElement>("[data-theme]");
@@ -668,20 +714,35 @@ function initializeEvents() {
   $("#sort-books").addEventListener("change", renderBooks);
   $<HTMLSelectElement>("#analytics-year").addEventListener("change", renderAnalytics);
   $<HTMLInputElement>("#catalog-search").addEventListener("input", event => scheduleCatalogSearch((event.currentTarget as HTMLInputElement).value));
-  $("#start-camera").addEventListener("click", startCamera);
-  $("#demo-scan").addEventListener("click", showScanResult);
-  $("#scan-result").addEventListener("click", event => {
-    if (event.target instanceof Element && event.target.closest("#add-scan-result")) addCatalogBook(catalogBooks[1], "バーコード");
+  $("#empty-add-isbn").addEventListener("click", () => openAddDialog("search"));
+  $("#empty-add-manual").addEventListener("click", () => openAddDialog("manual"));
+  $("#empty-clear-search").addEventListener("click", () => {
+    query = "";
+    $<HTMLInputElement>("#library-search").value = "";
+    $("#search-panel").hidden = true;
+    renderBooks();
   });
+
+  const syncManualFinishedAt = () => {
+    const status = $<HTMLSelectElement>('#manual-form [name="status"]').value;
+    const finishedAt = $<HTMLInputElement>("#manual-finished-at");
+    finishedAt.disabled = status !== "read";
+    if (status === "read" && !finishedAt.value) finishedAt.value = todayIso();
+  };
+  $<HTMLSelectElement>('#manual-form [name="status"]').addEventListener("change", syncManualFinishedAt);
+  syncManualFinishedAt();
 
   $<HTMLFormElement>("#manual-form").addEventListener("submit", event => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
-    if (!form.reportValidity()) return;
     const data = new FormData(form);
     const requestedStatus = String(data.get("status"));
     const status: BookStatus = isBookStatus(requestedStatus) ? requestedStatus : "read";
-    const candidate = normalizeBook({ id: crypto.randomUUID(), title: data.get("title"), author: data.get("author"), isbn: "", genre: data.get("genre"), pages: data.get("pages"), status, rating: data.get("rating"), finishedAt: status === "read" ? data.get("finishedAt") : "", createdAt: todayIso(), notes: "", review: "", cover: books.length % 6 });
+    const isbnInput = $<HTMLInputElement>('[name="isbn"]', form);
+    const rawIsbn = String(data.get("isbn") || "").trim();
+    isbnInput.setCustomValidity(rawIsbn && !isValidIsbn(rawIsbn) ? "ISBN-10またはISBN-13を確認してください" : "");
+    if (!form.reportValidity()) return;
+    const candidate = normalizeBook({ id: crypto.randomUUID(), title: data.get("title"), author: data.get("author"), isbn: rawIsbn ? normalizeIsbn(rawIsbn) : "", genre: data.get("genre"), pages: data.get("pages"), status, rating: data.get("rating"), finishedAt: status === "read" ? data.get("finishedAt") || todayIso() : "", createdAt: todayIso(), notes: data.get("notes"), review: data.get("review"), cover: books.length % 6, source: "manual" });
     if (!candidate) return;
     if (hasDuplicateBook(books, candidate)) {
       showToast(`「${candidate.title}」はすでに本棚にあります`);
@@ -691,6 +752,8 @@ function initializeEvents() {
     persist();
     renderAll();
     form.reset();
+    $<HTMLInputElement>("#manual-finished-at").value = todayIso();
+    syncManualFinishedAt();
     closeDialog("add-dialog");
     showToast("新しい本を追加しました");
   });
@@ -712,12 +775,23 @@ function initializeEvents() {
   $("#goal-minus").addEventListener("click", () => { settings.goal = Math.max(1, settings.goal - 1); persist(); updateGoalUI(); });
   $("#goal-plus").addEventListener("click", () => { settings.goal = Math.min(999, settings.goal + 1); persist(); updateGoalUI(); });
   $<HTMLInputElement>("#synopsis-toggle").addEventListener("change", event => { settings.synopsis = (event.currentTarget as HTMLInputElement).checked; persist(); showToast("設定を保存しました"); });
-  $("#show-science-books").addEventListener("click", () => { navigate("shelf"); setFilter("read"); query = "自然科学"; $("#search-panel").hidden = false; $<HTMLInputElement>("#library-search").value = query; renderBooks(); });
+  $("#show-insight-books").addEventListener("click", event => {
+    const genre = (event.currentTarget as HTMLElement).dataset.insightGenre || "";
+    if (!genre) {
+      openAddDialog("search");
+      return;
+    }
+    navigate("shelf");
+    setFilter("read");
+    query = genre;
+    $("#search-panel").hidden = false;
+    $<HTMLInputElement>("#library-search").value = query;
+    renderBooks();
+  });
 
   $$<HTMLDialogElement>('dialog').forEach(dialog => dialog.addEventListener("click", event => {
     if (event.target === dialog) closeDialog(dialog.id);
   }));
-  $<HTMLDialogElement>("#add-dialog").addEventListener("close", stopCamera);
 }
 
 function initialize() {
@@ -728,7 +802,7 @@ function initialize() {
   applyTheme(settings.theme);
   initializeEvents();
   initializeInstallExperience();
-  renderCatalog("");
+  renderCatalogResults([], "ISBNを入力すると、openBDから書誌情報を取得します。");
   renderAll();
   setTimeout(iconize, 150);
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});

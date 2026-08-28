@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 import csv
+from datetime import date
 import io
 import json
 from pathlib import Path
@@ -45,9 +46,22 @@ def preview_server():
             process.wait(timeout=5)
 
 
+def open_with_retry(page) -> None:
+    for attempt in range(3):
+        try:
+            page.goto(BASE_URL, wait_until="networkidle")
+            return
+        except Exception:
+            if attempt == 2:
+                raise
+            sleep(0.5)
+
+
 def run() -> None:
     ARTIFACTS.mkdir(exist_ok=True)
     errors = []
+    today = date.today().isoformat()
+
     with preview_server(), sync_playwright() as playwright:
         browser = playwright.chromium.launch(
             headless=True,
@@ -62,40 +76,61 @@ def run() -> None:
         page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
         page.on("pageerror", lambda error: errors.append(str(error)))
 
-        for attempt in range(3):
-            try:
-                page.goto(BASE_URL, wait_until="networkidle")
-                break
-            except Exception:
-                if attempt == 2:
-                    raise
-                sleep(0.5)
+        open_with_retry(page)
         page.locator("#shelf-title").wait_for()
-        assert page.locator("#book-grid .book-card").count() == 12
-        assert page.locator("#read-count").inner_text() == "12"
+
+        # A real first-time user starts with an empty, actionable shelf.
+        assert page.locator("#book-grid .book-card").count() == 0
+        assert page.locator("#read-count").inner_text() == "0"
+        assert "最初の一冊" in page.locator("#empty-title").inner_text()
+        assert page.locator("#empty-add-isbn").is_visible()
+        assert page.locator("#empty-add-manual").is_visible()
+        assert page.locator("#demo-scan").count() == 0
+        stored_empty = page.evaluate("JSON.parse(localStorage.getItem('yomu-reading-archive:v2'))")
+        assert stored_empty == {"schemaVersion": 2, "books": []}
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-        page.wait_for_timeout(450)
-        page.screenshot(path=str(ARTIFACTS / "mobile-shelf.png"), full_page=True)
+        page.wait_for_timeout(250)
+        page.screenshot(path=str(ARTIFACTS / "mobile-empty-shelf.png"), full_page=True)
 
-        page.get_by_role("tab", name="読書中 2").click()
-        assert page.locator("#book-grid .book-card").count() == 2
-
-        page.locator("#bottom-add").click()
-        page.get_by_role("tab", name="手入力").click()
-        page.locator("#manual-form [name=title]").fill("境界を歩く")
-        page.locator("#manual-form [name=author]").fill("佐伯 凛")
-        page.locator("#manual-form [name=pages]").fill("180")
-        page.locator("#manual-form [name=rating]").select_option("5")
-        page.locator("#manual-form button[type=submit]").click()
-        page.get_by_role("tab", name="読んだ 13").click()
-        assert page.locator("#book-grid .book-card").count() == 13
+        # Register a complete reading record manually, then prove it survives reload.
+        page.locator("#empty-add-manual").click()
+        form = page.locator("#manual-form")
+        form.locator("[name=title]").fill("境界を歩く")
+        form.locator("[name=author]").fill("佐伯 凛")
+        form.locator("[name=genre]").fill("文学・小説")
+        form.locator("[name=pages]").fill("180")
+        form.locator("[name=finishedAt]").fill(today)
+        form.locator("[name=rating]").select_option("5")
+        form.locator("[name=notes]").fill("42ページの引用を読み返す")
+        form.locator("[name=review]").fill("静かな余韻が残った。")
+        form.locator("button[type=submit]").click()
+        assert page.locator("#book-grid .book-card").count() == 1
+        assert page.locator("#read-count").inner_text() == "1"
+        page.reload(wait_until="networkidle")
+        assert page.locator("#book-grid .book-card").count() == 1
 
         page.get_by_role("button", name="境界を歩くの詳細を開く").click()
-        page.locator("#detail-form textarea[name=notes]").fill("検証用の読書メモ")
-        assert page.locator("#detail-form").evaluate("form => form.checkValidity()")
+        detail = page.locator("#detail-form")
+        detail.locator('[name="isbn"]').fill("123")
+        page.locator("#save-book").click()
+        assert page.locator("#detail-dialog").is_visible()
+        assert "ISBN-10" in detail.locator('[name="isbn"]').evaluate("input => input.validationMessage")
+        detail.locator('[name="isbn"]').fill("9784101010014")
+        detail.locator('[name="pages"]').fill("192")
+        detail.locator('[name="publisher"]').fill("検証出版社")
+        detail.locator('[name="notes"]').fill("検証用の読書メモ")
+        detail.get_by_role("button", name="評価4").click()
         page.locator("#save-book").click()
         page.locator("#detail-dialog").wait_for(state="hidden")
+        page.get_by_role("button", name="境界を歩くの詳細を開く").click()
+        saved_isbn = page.locator('#detail-form [name="isbn"]').input_value()
+        assert saved_isbn == "9784101010014", saved_isbn
+        assert page.locator('#detail-form [name="pages"]').input_value() == "192"
+        assert page.locator('#detail-form [name="publisher"]').input_value() == "検証出版社"
+        assert page.locator("#detail-form").get_attribute("data-rating") == "4"
+        page.locator('#detail-dialog [data-close="detail-dialog"]').click()
 
+        # ISBN lookup uses real openBD-shaped data and can register directly to a shelf.
         openbd_isbn = "9784873113364"
         page.route(
             f"https://api.openbd.jp/v1/get?isbn={openbd_isbn}",
@@ -118,36 +153,48 @@ def run() -> None:
             ),
         )
         page.locator("#bottom-add").click()
-        page.get_by_role("tab", name="検索").click()
+        page.locator("#catalog-status").select_option("wishlist")
         page.locator("#catalog-search").fill(openbd_isbn)
-        page.get_by_role("button", name="型で育てる読書記録を追加").wait_for()
-        page.get_by_role("button", name="型で育てる読書記録を追加").click()
-        page.get_by_role("button", name="型で育てる読書記録を追加").click()
+        result_button = page.get_by_role("button", name="型で育てる読書記録を追加")
+        result_button.wait_for()
+        result_button.click()
+        page.locator('[data-filter="wishlist"]').click()
+        assert page.locator("#book-grid .book-card").count() == 1
+
+        # Repeating the same ISBN must not create another record.
+        page.locator("#bottom-add").click()
+        page.locator("#catalog-search").fill("")
+        page.locator("#catalog-search").fill(openbd_isbn)
+        duplicate_button = page.get_by_role("button", name="型で育てる読書記録を追加")
+        duplicate_button.wait_for()
+        duplicate_button.click()
         assert "すでに本棚にあります" in page.locator("#toast").inner_text()
-        page.locator("#add-dialog [data-close=add-dialog]").click()
-        page.get_by_role("tab", name="読みたい 5").click()
-        assert page.locator("#book-grid .book-card").count() == 5
-        page.get_by_role("tab", name="読んだ 13").click()
+        page.locator('#add-dialog [data-close="add-dialog"]').click()
+        page.locator('[data-filter="read"]').click()
 
         page.locator(".bottom-nav [data-nav=analytics]").click()
-        assert page.locator("#analytics-total").inner_text() == "13"
-        assert page.locator("#genre-legend .legend-row").count() >= 6
+        assert page.locator("#analytics-total").inner_text() == "1"
+        assert page.locator("#genre-legend .legend-row").count() == 1
+        assert "文学・小説" in page.locator("#analytics-summary").inner_text()
         assert page.evaluate("[...document.querySelectorAll('dialog')].every(dialog => !dialog.open)")
         page.wait_for_function("!document.querySelector('#toast').classList.contains('is-visible')")
-        page.wait_for_timeout(450)
+        page.wait_for_timeout(250)
         page.screenshot(path=str(ARTIFACTS / "mobile-analytics.png"), full_page=True)
 
+        page.locator(".bottom-nav [data-nav=shelf]").click()
+        page.wait_for_timeout(250)
+        page.screenshot(path=str(ARTIFACTS / "mobile-shelf.png"), full_page=True)
+
+        # Import/export is the user's backup and migration path.
         page.locator(".bottom-nav [data-nav=settings]").click()
         assert page.locator("#install-app").is_visible()
         assert "ホーム画面" in page.locator("#install-status").inner_text()
         page.locator("#install-app").click()
         assert "ホーム画面に追加" in page.locator("#toast").inner_text()
-        page.wait_for_timeout(150)
-        page.screenshot(path=str(ARTIFACTS / "mobile-settings-install.png"), full_page=True)
         csv_buffer = io.StringIO(newline="")
         csv_writer = csv.writer(csv_buffer)
-        csv_writer.writerow(["灯りのない窓辺", "", "水原 澄", "", "架空出版社", "9784000000001", "2026/01/18", "重複", "", "", "", "2026/01/18", "0", "5"])
-        csv_writer.writerow(["CSVから来た本", "", "取込 著者", "", "架空出版社", "9784999999999", "2026/08/27", "取込メモ", "感想の一行目\n二行目", "", "", "2026/08/28", "0", "4"])
+        csv_writer.writerow(["境界を歩く", "", "佐伯 凛", "", "検証出版社", "9784101010014", today.replace("-", "/"), "重複", "", "", "", today.replace("-", "/"), "0", "4"])
+        csv_writer.writerow(["CSVから来た本", "", "取込 著者", "", "検証出版社", "", today.replace("-", "/"), "取込メモ", "感想の一行目\n二行目", "", "", today.replace("-", "/"), "0", "4"])
         csv_writer.writerow(["列不足"])
         page.locator("#import-csv-file").set_input_files({
             "name": "biblia-books.csv",
@@ -155,38 +202,44 @@ def run() -> None:
             "buffer": csv_buffer.getvalue().encode("utf-8"),
         })
         page.locator("#import-summary").wait_for(state="visible")
-        assert "ビブリア形式" in page.locator("#import-summary").inner_text()
-        assert "追加 1件" in page.locator("#import-summary").inner_text()
-        assert "重複スキップ 1件" in page.locator("#import-summary").inner_text()
-        assert "無効行 1件" in page.locator("#import-summary").inner_text()
+        import_summary = page.locator("#import-summary").inner_text()
+        assert "ビブリア形式" in import_summary
+        assert "追加 1件" in import_summary
+        assert "重複スキップ 1件" in import_summary
+        assert "無効行 1件" in import_summary
 
         with page.expect_download() as csv_download:
             page.locator("#export-csv").click()
         export_path = ARTIFACTS / "test-export.csv"
         csv_download.value.save_as(str(export_path))
         page.locator("#import-csv-file").set_input_files(str(export_path))
-        page.wait_for_function("document.querySelector('#import-summary').textContent.includes('重複スキップ 21件')")
+        page.wait_for_function("document.querySelector('#import-summary').textContent.includes('重複スキップ 3件')")
         assert "YOMU形式" in page.locator("#import-summary").inner_text()
         assert "追加 0件" in page.locator("#import-summary").inner_text()
+
         with page.expect_download() as json_download:
             page.locator("#export-json").click()
         backup_path = ARTIFACTS / "test-backup.json"
         json_download.value.save_as(str(backup_path))
         backup_data = json.loads(backup_path.read_text(encoding="utf-8"))
         assert backup_data["schemaVersion"] == 2
-        assert len(backup_data["books"]) == 21
+        assert len(backup_data["books"]) == 3
+
+        page.wait_for_function("!document.querySelector('#toast').classList.contains('is-visible')")
+        page.wait_for_timeout(250)
+        page.screenshot(path=str(ARTIFACTS / "mobile-settings.png"), full_page=True)
 
         page.set_viewport_size({"width": 1440, "height": 1000})
         page.locator(".side-nav [data-nav=analytics]").click()
+        assert page.locator("#analytics-total").inner_text() == "2"
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-        page.wait_for_function("!document.querySelector('#toast').classList.contains('is-visible')")
-        page.wait_for_timeout(450)
+        page.wait_for_timeout(250)
         page.screenshot(path=str(ARTIFACTS / "desktop-analytics.png"), full_page=True)
 
         page.set_viewport_size({"width": 768, "height": 1024})
         page.locator(".side-nav [data-nav=shelf]").click()
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-        page.wait_for_timeout(450)
+        page.wait_for_timeout(250)
         page.screenshot(path=str(ARTIFACTS / "tablet-shelf.png"), full_page=True)
 
         manifest = page.request.get(f"{BASE_URL}/manifest.json")
@@ -212,26 +265,21 @@ def run() -> None:
         assert not errors, f"Browser errors: {errors}"
         context.close()
 
-        migration_context = browser.new_context(
-            viewport={"width": 360, "height": 800},
-            service_workers="block",
-        )
+        # v1 data is migrated without deleting the legacy source.
+        migration_context = browser.new_context(viewport={"width": 360, "height": 800}, service_workers="block")
         migration_page = migration_context.new_page()
         migration_page.add_init_script(
             """(() => {
                 localStorage.setItem('yomu-reading-archive:v1', JSON.stringify([{
-                    id: 'legacy-1', title: '旧形式の本', author: '移行テスト', isbn: '978-4-00-000000-0',
+                    id: 'legacy-1', title: '旧形式の本', author: '移行テスト', isbn: '978-4-10-101001-4',
                     genre: 'テスト', pages: -20, status: 'read', rating: 9,
                     finished_at: '2025-12-31', created_at: '2025-01-01', notes: '', review: '', cover: 12
                 }]));
                 localStorage.setItem('yomu-settings:v1', JSON.stringify({theme: 'dark', goal: 1200, synopsis: false}));
             })()"""
         )
-        migration_page.goto(BASE_URL, wait_until="networkidle")
-        migrated_count = migration_page.locator("#book-grid .book-card").count()
-        assert migrated_count == 1, migration_page.evaluate(
-            "({legacy: localStorage.getItem('yomu-reading-archive:v1'), current: localStorage.getItem('yomu-reading-archive:v2')})"
-        )
+        open_with_retry(migration_page)
+        assert migration_page.locator("#book-grid .book-card").count() == 1
         migrated_library = migration_page.evaluate("JSON.parse(localStorage.getItem('yomu-reading-archive:v2'))")
         migrated_settings = migration_page.evaluate("JSON.parse(localStorage.getItem('yomu-settings:v2'))")
         assert migrated_library["schemaVersion"] == 2
@@ -242,18 +290,48 @@ def run() -> None:
         assert migration_page.evaluate("localStorage.getItem('yomu-reading-archive:v1') !== null")
         migration_context.close()
 
+        # Exact old demo rows are removed once, while a user's own row is retained.
+        cleanup_context = browser.new_context(viewport={"width": 360, "height": 800}, service_workers="block")
+        cleanup_page = cleanup_context.new_page()
+        cleanup_page.add_init_script(
+            """(() => {
+                const common = {isbn:'', genre:'その他', pages:0, status:'read', rating:0, finishedAt:'2026-01-01', createdAt:'2026-01-01', notes:'', review:'', cover:0};
+                localStorage.setItem('yomu-reading-archive:v2', JSON.stringify({schemaVersion:2, books:[
+                    {...common, id:'b01', title:'灯りのない窓辺', author:'架空 著者'},
+                    {...common, id:'my-book', title:'残すべき私の本', author:'利用者'}
+                ]}));
+            })()"""
+        )
+        open_with_retry(cleanup_page)
+        assert cleanup_page.locator("#book-grid .book-card").count() == 1
+        assert cleanup_page.get_by_text("残すべき私の本", exact=True).count() >= 1
+        assert cleanup_page.get_by_text("灯りのない窓辺", exact=True).count() == 0
+        cleaned_library = cleanup_page.evaluate("JSON.parse(localStorage.getItem('yomu-reading-archive:v2'))")
+        assert len(cleaned_library["books"]) == 1
+        assert cleanup_page.evaluate("localStorage.getItem('yomu-demo-library-cleanup:v1') === '1'")
+        cleanup_context.close()
+
+        # The application shell and existing records remain available offline.
         pwa_context = browser.new_context(viewport={"width": 360, "height": 800})
         pwa_page = pwa_context.new_page()
-        pwa_page.goto(BASE_URL, wait_until="networkidle")
+        pwa_errors = []
+        pwa_page.on("console", lambda message: pwa_errors.append(message.text) if message.type == "error" else None)
+        pwa_page.on("pageerror", lambda error: pwa_errors.append(str(error)))
+        pwa_page.on("requestfailed", lambda request: pwa_errors.append(f"{request.url}: {request.failure}"))
+        open_with_retry(pwa_page)
         pwa_page.evaluate("navigator.serviceWorker.ready")
         pwa_page.wait_for_function("navigator.serviceWorker.controller !== null")
+        cached_urls = pwa_page.evaluate("async () => { const names = await caches.keys(); const entries = await Promise.all(names.map(async key => (await (await caches.open(key)).keys()).map(request => request.url))); return entries.flat(); }")
         pwa_context.set_offline(True)
         pwa_page.reload(wait_until="domcontentloaded")
         assert pwa_page.locator("#shelf-title").inner_text() == "わたしの本棚"
+        pwa_page.wait_for_timeout(1000)
+        offline_ready = pwa_page.locator("#empty-add-manual").is_visible()
+        assert offline_ready, {"cached": cached_urls, "errors": pwa_errors, "stored": pwa_page.evaluate("localStorage.getItem('yomu-reading-archive:v2')")}
         pwa_context.close()
         browser.close()
 
-    print("PASS: shelf, add/edit, analytics, exports, offline PWA, and 360/768/1440 layouts")
+    print("PASS: empty first run, real records, ISBN/manual flows, migration, exports, offline PWA, and responsive layouts")
 
 
 if __name__ == "__main__":

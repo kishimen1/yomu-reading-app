@@ -1,4 +1,4 @@
-const CACHE_NAME = "yomu-shell-v5";
+const CACHE_NAME = "yomu-shell-v6";
 const CORE_SHELL = [
   "./",
   "./index.html",
@@ -40,7 +40,7 @@ self.addEventListener("fetch", event => {
   const requestUrl = new URL(event.request.url);
   if (requestUrl.origin !== self.location.origin) return;
   event.respondWith(
-    caches.match(event.request).then(cached => {
+    caches.match(event.request, { ignoreVary: true }).then(cached => {
       const network = fetch(event.request)
         .then(response => {
           if (response.ok || response.type === "opaque") {

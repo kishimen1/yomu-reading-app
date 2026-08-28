@@ -41,7 +41,7 @@
           </div>
           <div class="header-actions">
             <button class="icon-button" id="search-toggle" type="button" aria-label="本棚を検索" title="本棚を検索"><i data-lucide="search"></i></button>
-            <button class="primary-button" id="open-add" type="button"><i data-lucide="scan-line"></i><span>本を追加</span></button>
+            <button class="primary-button" id="open-add" type="button"><i data-lucide="book-plus"></i><span>本を追加</span></button>
           </div>
         </header>
 
@@ -92,9 +92,15 @@
 
         <div class="book-grid" id="book-grid" aria-live="polite"></div>
         <div class="empty-state" id="empty-state" hidden>
-          <i data-lucide="book-dashed"></i>
-          <h2>該当する本がありません</h2>
-          <p>検索条件を変えるか、新しい本を追加してください。</p>
+          <span class="empty-mark"><i data-lucide="book-open"></i></span>
+          <span class="section-kicker">YOUR FIRST SHELF</span>
+          <h2 id="empty-title">最初の一冊から、あなたの本棚へ</h2>
+          <p id="empty-copy">ISBNから書誌情報を取得するか、手入力で読書記録を始められます。</p>
+          <div class="empty-actions">
+            <button class="primary-button" id="empty-add-isbn" type="button"><i data-lucide="search"></i><span>ISBNから登録</span></button>
+            <button class="secondary-button" id="empty-add-manual" type="button"><i data-lucide="pencil-line"></i><span>手入力で登録</span></button>
+            <button class="text-button" id="empty-clear-search" type="button" hidden>検索をクリア</button>
+          </div>
         </div>
       </section>
 
@@ -114,17 +120,17 @@
         <div class="analytics-lead">
           <div>
             <span class="section-kicker">YEAR TO DATE</span>
-            <p class="lead-number"><strong id="analytics-total">12</strong><span>冊</span></p>
-            <p class="lead-note"><i data-lucide="trending-up"></i> 昨年同時期より <strong>20%</strong> 増加</p>
+            <p class="lead-number"><strong id="analytics-total">0</strong><span>冊</span></p>
+            <p class="lead-note" id="analytics-comparison"><i data-lucide="book-open"></i> 読了日を入れた本が集計されます</p>
           </div>
-          <blockquote>「物語」と「科学」の往復が、今年の読書を形づくっています。</blockquote>
+          <blockquote id="analytics-summary">本を読み終えたら、読了日を記録してみましょう。</blockquote>
         </div>
 
         <div class="kpi-grid">
-          <article class="kpi"><span>読了ページ</span><strong id="kpi-pages">3,842</strong><small>ページ</small></article>
-          <article class="kpi"><span>平均評価</span><strong id="kpi-rating">4.2</strong><small>/ 5.0</small></article>
-          <article class="kpi"><span>月平均</span><strong id="kpi-monthly">1.5</strong><small>冊</small></article>
-          <article class="kpi"><span>新しい著者</span><strong id="kpi-authors">9</strong><small>人</small></article>
+          <article class="kpi"><span>読了ページ</span><strong id="kpi-pages">0</strong><small>ページ</small></article>
+          <article class="kpi"><span>平均評価</span><strong id="kpi-rating">0.0</strong><small>/ 5.0</small></article>
+          <article class="kpi"><span>月平均</span><strong id="kpi-monthly">0.0</strong><small>冊</small></article>
+          <article class="kpi"><span>新しい著者</span><strong id="kpi-authors">0</strong><small>人</small></article>
         </div>
 
         <div class="dashboard-grid">
@@ -136,7 +142,7 @@
             </div>
           </article>
           <article class="dashboard-panel trend-panel">
-            <div class="panel-heading"><div><span class="section-kicker">MONTHLY TREND</span><h2>月別の読了冊数</h2></div><span class="signal-up"><i data-lucide="arrow-up-right"></i> 伸長</span></div>
+            <div class="panel-heading"><div><span class="section-kicker">MONTHLY TREND</span><h2>月別の読了冊数</h2></div><span class="signal-up" id="trend-signal"><i data-lucide="minus"></i> 記録なし</span></div>
             <div class="month-chart" id="month-chart" aria-label="月別の読了冊数"></div>
           </article>
           <article class="dashboard-panel rating-panel">
@@ -145,9 +151,9 @@
           </article>
           <article class="dashboard-panel insight-panel">
             <span class="section-kicker">INSIGHT</span>
-            <h2>今月の発見</h2>
-            <p>自然科学の本は平均評価が <strong>4.7</strong>。あなたにとって満足度の高い領域です。</p>
-            <button type="button" id="show-science-books">該当する本を見る <i data-lucide="arrow-right"></i></button>
+            <h2 id="insight-title">記録から見えてくること</h2>
+            <p id="insight-copy">読了記録が増えると、よく読むジャンルや満足度の高い領域が見えてきます。</p>
+            <button type="button" id="show-insight-books" data-insight-genre="">最初の本を追加する <i data-lucide="arrow-right"></i></button>
           </article>
         </div>
       </section>
@@ -188,9 +194,9 @@
             <label class="setting-row"><div><strong>あらすじをメモに追加</strong><span>書誌取得時に自動入力</span></div><input class="switch" type="checkbox" id="synopsis-toggle" checked></label>
           </section>
           <section class="settings-section about-section">
-            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>PWA 0.3.0</span></div></div>
+            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>PWA 1.0.0</span></div></div>
             <p>読書の記憶を、あとから読み解ける記録へ。</p>
-            <span class="release-badge">PUBLIC PREVIEW</span>
+            <span class="release-badge">LOCAL FIRST</span>
           </section>
         </div>
       </section>
@@ -208,35 +214,28 @@
     <div class="dialog-handle" aria-hidden="true"></div>
     <header class="dialog-header"><div><span class="section-kicker">NEW RECORD</span><h2>本を追加</h2></div><button class="icon-button" data-close="add-dialog" type="button" aria-label="閉じる"><i data-lucide="x"></i></button></header>
     <div class="segmented add-modes" role="tablist" aria-label="追加方法">
-      <button class="is-active" data-add-mode="scan" role="tab"><i data-lucide="scan-barcode"></i>スキャン</button>
-      <button data-add-mode="search" role="tab"><i data-lucide="search"></i>検索</button>
+      <button class="is-active" data-add-mode="search" role="tab"><i data-lucide="search"></i>ISBN検索</button>
       <button data-add-mode="manual" role="tab"><i data-lucide="pencil-line"></i>手入力</button>
     </div>
-    <div class="add-view is-active" data-add-view="scan">
-      <div class="scanner-stage">
-        <video id="camera-preview" playsinline muted hidden></video>
-        <div class="scan-corners"><span></span><span></span><span></span><span></span><div class="scan-line"></div></div>
-        <i data-lucide="barcode"></i><strong>ISBNバーコードを枠内に合わせる</strong><small>カメラ対応端末では実際にプレビューを起動できます</small>
+    <div class="add-view is-active" data-add-view="search">
+      <div class="catalog-controls">
+        <label class="field"><span>ISBN-10 / ISBN-13</span><div class="input-with-icon"><i data-lucide="search"></i><input id="catalog-search" type="search" inputmode="text" autocomplete="off" placeholder="例: 9784873113364" maxlength="30"></div></label>
+        <label class="field catalog-status"><span>登録先</span><select id="catalog-status"><option value="read">読んだ</option><option value="reading">読書中</option><option value="wishlist">読みたい</option></select></label>
       </div>
-      <div class="scan-actions">
-        <button class="secondary-button" id="start-camera" type="button"><i data-lucide="camera"></i>カメラを起動</button>
-        <button class="primary-button" id="demo-scan" type="button"><i data-lucide="scan-line"></i>サンプルを読み取る</button>
-      </div>
-      <div class="scan-result" id="scan-result" hidden></div>
-    </div>
-    <div class="add-view" data-add-view="search">
-      <label class="field"><span>タイトル・著者・ISBN</span><div class="input-with-icon"><i data-lucide="search"></i><input id="catalog-search" type="search" inputmode="search" autocomplete="off" placeholder="ISBNなら実際の書誌を検索"></div></label>
-      <p class="catalog-source" id="catalog-source">ISBN-10／ISBN-13はopenBD、書名・著者は端末内のデモ候補を検索します。</p>
+      <p class="catalog-source" id="catalog-source">ISBN検索はopenBDを利用します。未収録の場合は手入力で登録できます。</p>
       <div class="catalog-results" id="catalog-results"></div>
     </div>
     <form class="add-view form-grid" data-add-view="manual" id="manual-form">
       <label class="field span-2"><span>タイトル *</span><input name="title" required maxlength="500" placeholder="本のタイトル"></label>
       <label class="field"><span>著者 *</span><input name="author" required maxlength="300" placeholder="著者名"></label>
-      <label class="field"><span>ジャンル</span><select name="genre"><option>文学・小説</option><option>自然科学</option><option>ビジネス</option><option>歴史</option><option>心理・思想</option><option>紀行・エッセイ</option><option>その他</option></select></label>
-      <label class="field"><span>ページ数</span><input name="pages" type="number" min="1" max="100000" inputmode="numeric" placeholder="320"></label>
+      <label class="field"><span>ISBN</span><input name="isbn" maxlength="30" inputmode="text" placeholder="任意"></label>
+      <label class="field"><span>ジャンル</span><input name="genre" list="genre-options" maxlength="100" value="その他"></label>
+      <label class="field"><span>ページ数</span><input name="pages" type="number" min="0" max="100000" inputmode="numeric" placeholder="320"></label>
       <label class="field"><span>読了日</span><input id="manual-finished-at" name="finishedAt" type="date"></label>
       <label class="field"><span>状態</span><select name="status"><option value="read">読んだ</option><option value="reading">読書中</option><option value="wishlist">読みたい</option></select></label>
       <label class="field"><span>評価</span><select name="rating"><option value="0">未評価</option><option value="5">5 - とても良い</option><option value="4">4 - 良い</option><option value="3">3 - ふつう</option><option value="2">2</option><option value="1">1</option></select></label>
+      <label class="field span-2"><span>メモ</span><textarea name="notes" maxlength="50000" placeholder="引用、ページ番号、気づきなど"></textarea></label>
+      <label class="field span-2"><span>感想</span><textarea name="review" maxlength="50000" placeholder="読後の感想"></textarea></label>
       <button class="primary-button span-2 submit-button" type="submit"><i data-lucide="plus"></i>本棚に追加</button>
     </form>
   </dialog>
@@ -247,5 +246,8 @@
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"><i data-lucide="circle-check"></i><span></span></div>
+  <datalist id="genre-options">
+    <option value="文学・小説"><option value="自然科学"><option value="ビジネス"><option value="歴史"><option value="心理・思想"><option value="紀行・エッセイ"><option value="漫画"><option value="技術・IT"><option value="その他">
+  </datalist>
 </body>
 </html>
