@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f4f6f3">
+  <meta name="description" content="読書記録と読書傾向を一つにまとめるAndroid対応PWAモックアップ">
+  <title>YOMU - 読書の記録と分析</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="assets/app-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script src="assets/lucide.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="メインナビゲーション">
+      <button class="brand" type="button" data-nav="shelf" aria-label="YOMU ホーム">
+        <img src="assets/app-icon.png" alt="" class="brand-mark">
+        <span class="brand-copy"><strong>YOMU</strong><small>READING ARCHIVE</small></span>
+      </button>
+      <nav class="side-nav">
+        <button class="nav-item is-active" data-nav="shelf" type="button"><i data-lucide="library-big"></i><span>本棚</span></button>
+        <button class="nav-item" data-nav="analytics" type="button"><i data-lucide="chart-no-axes-combined"></i><span>読書分析</span></button>
+        <button class="nav-item" data-nav="settings" type="button"><i data-lucide="settings-2"></i><span>設定</span></button>
+      </nav>
+      <div class="side-summary">
+        <span>2026年の記録</span>
+        <strong id="sidebar-year-count">12冊</strong>
+        <div class="progress-track"><span style="width: 67%"></span></div>
+        <small>年間目標 18冊</small>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <section class="screen is-active" id="screen-shelf" aria-labelledby="shelf-title">
+        <header class="screen-header">
+          <div>
+            <p class="eyebrow" id="today-label">FRIDAY, AUGUST 28</p>
+            <h1 id="shelf-title">わたしの本棚</h1>
+          </div>
+          <div class="header-actions">
+            <button class="icon-button" id="search-toggle" type="button" aria-label="本棚を検索" title="本棚を検索"><i data-lucide="search"></i></button>
+            <button class="primary-button" id="open-add" type="button"><i data-lucide="scan-line"></i><span>本を追加</span></button>
+          </div>
+        </header>
+
+        <div class="search-panel" id="search-panel" hidden>
+          <i data-lucide="search"></i>
+          <input id="library-search" type="search" placeholder="タイトル・著者・ISBNで検索" autocomplete="off">
+          <button class="icon-button compact" id="close-search" type="button" aria-label="検索を閉じる"><i data-lucide="x"></i></button>
+        </div>
+
+        <div class="shelf-overview">
+          <div class="overview-copy">
+            <span class="section-kicker">READING PULSE</span>
+            <p>今月は <strong id="month-count">3冊</strong> 読了。<br><span id="pace-copy">先月より1冊多いペースです。</span></p>
+          </div>
+          <div class="mini-bars" aria-label="直近6か月の読了冊数">
+            <span style="--bar: 35%"><small>3月</small></span>
+            <span style="--bar: 58%"><small>4月</small></span>
+            <span style="--bar: 42%"><small>5月</small></span>
+            <span style="--bar: 74%"><small>6月</small></span>
+            <span style="--bar: 54%"><small>7月</small></span>
+            <span class="current" style="--bar: 88%"><small>8月</small></span>
+          </div>
+        </div>
+
+        <div class="library-toolbar">
+          <div class="shelf-tabs" role="tablist" aria-label="本棚の種類">
+            <button class="shelf-tab is-active" role="tab" aria-selected="true" data-filter="read">読んだ <span id="read-count">0</span></button>
+            <button class="shelf-tab" role="tab" aria-selected="false" data-filter="reading">読書中 <span id="reading-count">0</span></button>
+            <button class="shelf-tab" role="tab" aria-selected="false" data-filter="wishlist">読みたい <span id="wishlist-count">0</span></button>
+          </div>
+          <div class="toolbar-actions">
+            <label class="select-control">
+              <span class="sr-only">並び順</span>
+              <select id="sort-books">
+                <option value="date-desc">新しい順</option>
+                <option value="date-asc">古い順</option>
+                <option value="rating-desc">評価の高い順</option>
+                <option value="title-asc">タイトル順</option>
+              </select>
+              <i data-lucide="chevron-down"></i>
+            </label>
+            <div class="view-switch" role="group" aria-label="表示形式">
+              <button class="is-active" type="button" data-view="grid" aria-label="グリッド表示" title="グリッド表示"><i data-lucide="grid-2x2"></i></button>
+              <button type="button" data-view="list" aria-label="リスト表示" title="リスト表示"><i data-lucide="list"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="book-grid" id="book-grid" aria-live="polite"></div>
+        <div class="empty-state" id="empty-state" hidden>
+          <i data-lucide="book-dashed"></i>
+          <h2>該当する本がありません</h2>
+          <p>検索条件を変えるか、新しい本を追加してください。</p>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-analytics" aria-labelledby="analytics-title">
+        <header class="screen-header">
+          <div>
+            <p class="eyebrow">READING INTELLIGENCE</p>
+            <h1 id="analytics-title">読書分析</h1>
+          </div>
+          <label class="select-control year-select">
+            <span class="sr-only">集計年</span>
+            <select id="analytics-year"><option>2026年</option><option>2025年</option><option>すべて</option></select>
+            <i data-lucide="chevron-down"></i>
+          </label>
+        </header>
+
+        <div class="analytics-lead">
+          <div>
+            <span class="section-kicker">YEAR TO DATE</span>
+            <p class="lead-number"><strong id="analytics-total">12</strong><span>冊</span></p>
+            <p class="lead-note"><i data-lucide="trending-up"></i> 昨年同時期より <strong>20%</strong> 増加</p>
+          </div>
+          <blockquote>「物語」と「科学」の往復が、今年の読書を形づくっています。</blockquote>
+        </div>
+
+        <div class="kpi-grid">
+          <article class="kpi"><span>読了ページ</span><strong id="kpi-pages">3,842</strong><small>ページ</small></article>
+          <article class="kpi"><span>平均評価</span><strong id="kpi-rating">4.2</strong><small>/ 5.0</small></article>
+          <article class="kpi"><span>月平均</span><strong id="kpi-monthly">1.5</strong><small>冊</small></article>
+          <article class="kpi"><span>新しい著者</span><strong id="kpi-authors">9</strong><small>人</small></article>
+        </div>
+
+        <div class="dashboard-grid">
+          <article class="dashboard-panel genre-panel">
+            <div class="panel-heading"><div><span class="section-kicker">COMPOSITION</span><h2>ジャンル構成</h2></div><button class="icon-button compact" type="button" aria-label="ジャンル分析の情報" title="登録ジャンルの構成比"><i data-lucide="info"></i></button></div>
+            <div class="donut-layout">
+              <div class="donut" id="genre-donut" role="img" aria-label="ジャンル別の割合"><div><strong>6</strong><span>ジャンル</span></div></div>
+              <div class="genre-legend" id="genre-legend"></div>
+            </div>
+          </article>
+          <article class="dashboard-panel trend-panel">
+            <div class="panel-heading"><div><span class="section-kicker">MONTHLY TREND</span><h2>月別の読了冊数</h2></div><span class="signal-up"><i data-lucide="arrow-up-right"></i> 伸長</span></div>
+            <div class="month-chart" id="month-chart" aria-label="2026年月別の読了冊数"></div>
+          </article>
+          <article class="dashboard-panel rating-panel">
+            <div class="panel-heading"><div><span class="section-kicker">RATING</span><h2>評価の分布</h2></div></div>
+            <div class="rating-bars" id="rating-bars"></div>
+          </article>
+          <article class="dashboard-panel insight-panel">
+            <span class="section-kicker">INSIGHT</span>
+            <h2>今月の発見</h2>
+            <p>自然科学の本は平均評価が <strong>4.7</strong>。あなたにとって満足度の高い領域です。</p>
+            <button type="button" id="show-science-books">該当する本を見る <i data-lucide="arrow-right"></i></button>
+          </article>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-settings" aria-labelledby="settings-title">
+        <header class="screen-header">
+          <div><p class="eyebrow">DATA & PREFERENCES</p><h1 id="settings-title">設定</h1></div>
+        </header>
+        <div class="settings-layout">
+          <section class="settings-section">
+            <div class="settings-title"><i data-lucide="database"></i><div><h2>データ管理</h2><p>記録はこの端末内に保存されています。</p></div></div>
+            <div class="export-grid">
+              <button class="export-option" id="export-csv" type="button"><span class="file-type">CSV</span><span><strong>分析用に書き出す</strong><small>Excel・BIツール向け</small></span><i data-lucide="download"></i></button>
+              <button class="export-option" id="export-json" type="button"><span class="file-type dark">JSON</span><span><strong>完全バックアップ</strong><small>メモ・設定を含む</small></span><i data-lucide="download"></i></button>
+              <button class="export-option" id="import-json" type="button"><span class="file-type outline">IN</span><span><strong>バックアップを復元</strong><small>JSONファイルを選択</small></span><i data-lucide="upload"></i></button>
+              <input id="import-file" type="file" accept="application/json,.json" hidden>
+            </div>
+            <div class="data-note"><i data-lucide="shield-check"></i><p><strong>プライバシーファースト</strong><br>モックではアカウント登録や外部送信を行いません。本稼働版では暗号化同期を選択式で提供します。</p></div>
+          </section>
+          <section class="settings-section">
+            <div class="settings-title"><i data-lucide="sliders-horizontal"></i><div><h2>表示と記録</h2><p>日々の記録方法を調整します。</p></div></div>
+            <div class="setting-row"><div><strong>外観</strong><span>端末の設定に合わせます</span></div><div class="segmented small" id="theme-control"><button data-theme="light">ライト</button><button class="is-active" data-theme="system">自動</button><button data-theme="dark">ダーク</button></div></div>
+            <label class="setting-row"><div><strong>読書目標</strong><span>年間の読了冊数</span></div><div class="stepper"><button type="button" id="goal-minus" aria-label="目標を1冊減らす"><i data-lucide="minus"></i></button><output id="goal-value">18冊</output><button type="button" id="goal-plus" aria-label="目標を1冊増やす"><i data-lucide="plus"></i></button></div></label>
+            <label class="setting-row"><div><strong>あらすじをメモに追加</strong><span>書誌取得時に自動入力</span></div><input class="switch" type="checkbox" id="synopsis-toggle" checked></label>
+          </section>
+          <section class="settings-section about-section">
+            <div class="about-brand"><img src="assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>Prototype 0.1.0</span></div></div>
+            <p>読書の記憶を、あとから読み解ける記録へ。</p>
+            <a href="README.md" target="_blank">開発ロードマップ <i data-lucide="external-link"></i></a>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav" aria-label="メインナビゲーション">
+      <button class="nav-item is-active" data-nav="shelf" type="button"><i data-lucide="library-big"></i><span>本棚</span></button>
+      <button class="nav-item add-nav" id="bottom-add" type="button" aria-label="本を追加"><span><i data-lucide="plus"></i></span><small>追加</small></button>
+      <button class="nav-item" data-nav="analytics" type="button"><i data-lucide="chart-no-axes-combined"></i><span>分析</span></button>
+      <button class="nav-item" data-nav="settings" type="button"><i data-lucide="settings-2"></i><span>設定</span></button>
+    </nav>
+  </div>
+
+  <dialog class="sheet-dialog" id="add-dialog">
+    <div class="dialog-handle" aria-hidden="true"></div>
+    <header class="dialog-header"><div><span class="section-kicker">NEW RECORD</span><h2>本を追加</h2></div><button class="icon-button" data-close="add-dialog" type="button" aria-label="閉じる"><i data-lucide="x"></i></button></header>
+    <div class="segmented add-modes" role="tablist" aria-label="追加方法">
+      <button class="is-active" data-add-mode="scan" role="tab"><i data-lucide="scan-barcode"></i>スキャン</button>
+      <button data-add-mode="search" role="tab"><i data-lucide="search"></i>検索</button>
+      <button data-add-mode="manual" role="tab"><i data-lucide="pencil-line"></i>手入力</button>
+    </div>
+    <div class="add-view is-active" data-add-view="scan">
+      <div class="scanner-stage">
+        <video id="camera-preview" playsinline muted hidden></video>
+        <div class="scan-corners"><span></span><span></span><span></span><span></span><div class="scan-line"></div></div>
+        <i data-lucide="barcode"></i><strong>ISBNバーコードを枠内に合わせる</strong><small>カメラ対応端末では実際にプレビューを起動できます</small>
+      </div>
+      <div class="scan-actions">
+        <button class="secondary-button" id="start-camera" type="button"><i data-lucide="camera"></i>カメラを起動</button>
+        <button class="primary-button" id="demo-scan" type="button"><i data-lucide="scan-line"></i>サンプルを読み取る</button>
+      </div>
+      <div class="scan-result" id="scan-result" hidden></div>
+    </div>
+    <div class="add-view" data-add-view="search">
+      <label class="field"><span>タイトル・著者・ISBN</span><div class="input-with-icon"><i data-lucide="search"></i><input id="catalog-search" type="search" placeholder="例：夜と霧"></div></label>
+      <div class="catalog-results" id="catalog-results"></div>
+    </div>
+    <form class="add-view form-grid" data-add-view="manual" id="manual-form">
+      <label class="field span-2"><span>タイトル *</span><input name="title" required placeholder="本のタイトル"></label>
+      <label class="field"><span>著者 *</span><input name="author" required placeholder="著者名"></label>
+      <label class="field"><span>ジャンル</span><select name="genre"><option>文学・小説</option><option>自然科学</option><option>ビジネス</option><option>歴史</option><option>心理・思想</option><option>紀行・エッセイ</option><option>その他</option></select></label>
+      <label class="field"><span>ページ数</span><input name="pages" type="number" min="1" inputmode="numeric" placeholder="320"></label>
+      <label class="field"><span>読了日</span><input name="finishedAt" type="date" value="2026-08-28"></label>
+      <label class="field"><span>状態</span><select name="status"><option value="read">読んだ</option><option value="reading">読書中</option><option value="wishlist">読みたい</option></select></label>
+      <label class="field"><span>評価</span><select name="rating"><option value="0">未評価</option><option value="5">5 - とても良い</option><option value="4">4 - 良い</option><option value="3">3 - ふつう</option><option value="2">2</option><option value="1">1</option></select></label>
+      <button class="primary-button span-2 submit-button" type="submit"><i data-lucide="plus"></i>本棚に追加</button>
+    </form>
+  </dialog>
+
+  <dialog class="detail-dialog" id="detail-dialog">
+    <button class="icon-button dialog-close" data-close="detail-dialog" type="button" aria-label="閉じる"><i data-lucide="x"></i></button>
+    <div id="detail-content"></div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"><i data-lucide="circle-check"></i><span></span></div>
+</body>
+</html>
