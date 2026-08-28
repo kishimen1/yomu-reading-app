@@ -98,7 +98,7 @@ h2 { letter-spacing: 0; }
 .book-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: 32px 22px; }
 .book-card { min-width: 0; animation: card-in .4s ease both; }
 @keyframes card-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
-.book-cover { position: relative; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; border: 0; padding: 0; background-color: #d8d8d3; background-image: url("assets/book-cover-sprite.png"); background-size: 300% 200%; background-position: var(--cover-position); box-shadow: 0 11px 25px rgba(25, 28, 26, .16); text-align: left; }
+.book-cover { position: relative; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; border: 0; padding: 0; background-color: #d8d8d3; background-image: url("/assets/book-cover-sprite.png"); background-size: 300% 200%; background-position: var(--cover-position); box-shadow: 0 11px 25px rgba(25, 28, 26, .16); text-align: left; }
 .book-cover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(12, 14, 13, .74) 0, rgba(12, 14, 13, .06) 54%); }
 .book-cover:hover { transform: translateY(-4px); box-shadow: 0 17px 34px rgba(25, 28, 26, .2); }
 .book-cover, .book-cover:hover { transition: transform .24s ease, box-shadow .24s ease; }
@@ -178,6 +178,8 @@ h2 { letter-spacing: 0; }
 .export-option > svg { width: 18px; color: var(--muted); }
 .export-option span:nth-child(2) { display: grid; gap: 3px; }
 .export-option small { color: var(--muted); font-size: 10px; }
+.import-summary { margin-top: 12px; padding: 13px 15px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); color: var(--muted); font-size: 11px; line-height: 1.7; }
+.import-summary strong { color: var(--ink); }
 .file-type { width: 44px; height: 44px; display: grid; place-items: center; background: var(--green); color: #fff; font-size: 10px; font-weight: 800; }
 .file-type.dark { background: var(--ink); }
 .file-type.outline { border: 1px solid var(--ink); background: transparent; color: var(--ink); }
@@ -238,7 +240,8 @@ dialog::backdrop { background: rgba(10, 12, 11, .62); backdrop-filter: blur(3px)
 @keyframes scan { 0%,100% { transform: translateY(-65px); } 50% { transform: translateY(65px); } }
 .scan-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 12px; }
 .scan-result, .catalog-result { display: grid; grid-template-columns: 56px 1fr auto; gap: 13px; align-items: center; margin-top: 12px; padding: 12px; border: 1px solid var(--line); background: var(--surface); }
-.result-cover { width: 56px; aspect-ratio: 2/3; background: url("assets/book-cover-sprite.png"); background-size: 300% 200%; background-position: var(--cover-position); }
+.result-cover { width: 56px; aspect-ratio: 2/3; background: url("/assets/book-cover-sprite.png"); background-size: 300% 200%; background-position: var(--cover-position); }
+.result-cover img, .book-cover > img, .detail-cover > img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .scan-result span, .catalog-result span { display: grid; gap: 3px; }
 .scan-result small, .catalog-result small { color: var(--muted); font-size: 10px; }
 .scan-result button, .catalog-result button { width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: var(--ink); color: #fff; }
@@ -250,6 +253,7 @@ dialog::backdrop { background: rgba(10, 12, 11, .62); backdrop-filter: blur(3px)
 .input-with-icon svg { position: absolute; top: 50%; left: 13px; width: 18px; transform: translateY(-50%); color: var(--muted); }
 .input-with-icon input { padding-left: 42px; }
 .catalog-results { display: grid; gap: 8px; margin-top: 15px; }
+.catalog-source { min-height: 1.5em; margin: 9px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .catalog-result { margin: 0; }
 .form-grid { grid-template-columns: 1fr 1fr; gap: 16px; }
 .form-grid.is-active { display: grid; }
@@ -260,7 +264,7 @@ dialog::backdrop { background: rgba(10, 12, 11, .62); backdrop-filter: blur(3px)
 .dialog-close { position: absolute; z-index: 5; top: 16px; right: 16px; }
 .detail-layout { display: grid; grid-template-columns: minmax(240px, 330px) 1fr; min-height: 600px; }
 .detail-cover-panel { position: relative; min-height: 540px; padding: 46px; display: flex; align-items: center; justify-content: center; background: #1a1e1b; }
-.detail-cover { width: min(220px, 86%); aspect-ratio: 2/3; background: url("assets/book-cover-sprite.png"); background-size: 300% 200%; background-position: var(--cover-position); box-shadow: 0 22px 40px rgba(0,0,0,.4); }
+.detail-cover { width: min(220px, 86%); aspect-ratio: 2/3; background: url("/assets/book-cover-sprite.png"); background-size: 300% 200%; background-position: var(--cover-position); box-shadow: 0 22px 40px rgba(0,0,0,.4); }
 .detail-form { padding: 50px 40px 35px; }
 .detail-form .section-kicker { margin-bottom: 9px; }
 .detail-form h2 { margin: 0 0 5px; font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-size: 31px; line-height: 1.4; }

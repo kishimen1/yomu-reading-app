@@ -6,17 +6,17 @@
   <meta name="theme-color" content="#f4f6f3">
   <meta name="description" content="読書記録と読書傾向を一つにまとめるAndroid対応PWAモックアップ">
   <title>YOMU - 読書の記録と分析</title>
-  <link rel="manifest" href="manifest.json">
-  <link rel="icon" href="assets/app-icon.png">
-  <link rel="stylesheet" href="styles.css">
-  <script src="assets/lucide.min.js" defer></script>
-  <script src="app.js" defer></script>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="/assets/app-icon-192.png">
+  <link rel="apple-touch-icon" href="/assets/app-icon-192.png">
+  <script src="/assets/lucide.min.js" defer></script>
+  <script type="module" src="/src/main.ts"></script>
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar" aria-label="メインナビゲーション">
       <button class="brand" type="button" data-nav="shelf" aria-label="YOMU ホーム">
-        <img src="assets/app-icon.png" alt="" class="brand-mark">
+        <img src="/assets/app-icon.png" alt="" class="brand-mark">
         <span class="brand-copy"><strong>YOMU</strong><small>READING ARCHIVE</small></span>
       </button>
       <nav class="side-nav">
@@ -25,7 +25,7 @@
         <button class="nav-item" data-nav="settings" type="button"><i data-lucide="settings-2"></i><span>設定</span></button>
       </nav>
       <div class="side-summary">
-        <span>2026年の記録</span>
+        <span id="sidebar-year-label">今年の記録</span>
         <strong id="sidebar-year-count">12冊</strong>
         <div class="progress-track"><span style="width: 67%"></span></div>
         <small>年間目標 18冊</small>
@@ -106,7 +106,7 @@
           </div>
           <label class="select-control year-select">
             <span class="sr-only">集計年</span>
-            <select id="analytics-year"><option>2026年</option><option>2025年</option><option>すべて</option></select>
+            <select id="analytics-year" aria-label="分析対象年"></select>
             <i data-lucide="chevron-down"></i>
           </label>
         </header>
@@ -137,7 +137,7 @@
           </article>
           <article class="dashboard-panel trend-panel">
             <div class="panel-heading"><div><span class="section-kicker">MONTHLY TREND</span><h2>月別の読了冊数</h2></div><span class="signal-up"><i data-lucide="arrow-up-right"></i> 伸長</span></div>
-            <div class="month-chart" id="month-chart" aria-label="2026年月別の読了冊数"></div>
+            <div class="month-chart" id="month-chart" aria-label="月別の読了冊数"></div>
           </article>
           <article class="dashboard-panel rating-panel">
             <div class="panel-heading"><div><span class="section-kicker">RATING</span><h2>評価の分布</h2></div></div>
@@ -161,10 +161,13 @@
             <div class="settings-title"><i data-lucide="database"></i><div><h2>データ管理</h2><p>記録はこの端末内に保存されています。</p></div></div>
             <div class="export-grid">
               <button class="export-option" id="export-csv" type="button"><span class="file-type">CSV</span><span><strong>分析用に書き出す</strong><small>Excel・BIツール向け</small></span><i data-lucide="download"></i></button>
+              <button class="export-option" id="import-csv" type="button"><span class="file-type outline">CSV</span><span><strong>CSVから取り込む</strong><small>YOMU・ビブリア形式</small></span><i data-lucide="upload"></i></button>
               <button class="export-option" id="export-json" type="button"><span class="file-type dark">JSON</span><span><strong>完全バックアップ</strong><small>メモ・設定を含む</small></span><i data-lucide="download"></i></button>
               <button class="export-option" id="import-json" type="button"><span class="file-type outline">IN</span><span><strong>バックアップを復元</strong><small>JSONファイルを選択</small></span><i data-lucide="upload"></i></button>
               <input id="import-file" type="file" accept="application/json,.json" hidden>
+              <input id="import-csv-file" type="file" accept="text/csv,.csv" hidden>
             </div>
+            <div class="import-summary" id="import-summary" role="status" aria-live="polite" hidden></div>
             <div class="data-note"><i data-lucide="shield-check"></i><p><strong>プライバシーファースト</strong><br>モックではアカウント登録や外部送信を行いません。本稼働版では暗号化同期を選択式で提供します。</p></div>
           </section>
           <section class="settings-section">
@@ -174,7 +177,7 @@
             <label class="setting-row"><div><strong>あらすじをメモに追加</strong><span>書誌取得時に自動入力</span></div><input class="switch" type="checkbox" id="synopsis-toggle" checked></label>
           </section>
           <section class="settings-section about-section">
-            <div class="about-brand"><img src="assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>Prototype 0.1.0</span></div></div>
+            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>Prototype 0.2.0</span></div></div>
             <p>読書の記憶を、あとから読み解ける記録へ。</p>
             <a href="README.md" target="_blank">開発ロードマップ <i data-lucide="external-link"></i></a>
           </section>
@@ -211,15 +214,16 @@
       <div class="scan-result" id="scan-result" hidden></div>
     </div>
     <div class="add-view" data-add-view="search">
-      <label class="field"><span>タイトル・著者・ISBN</span><div class="input-with-icon"><i data-lucide="search"></i><input id="catalog-search" type="search" placeholder="例：夜と霧"></div></label>
+      <label class="field"><span>タイトル・著者・ISBN</span><div class="input-with-icon"><i data-lucide="search"></i><input id="catalog-search" type="search" inputmode="search" autocomplete="off" placeholder="ISBNなら実際の書誌を検索"></div></label>
+      <p class="catalog-source" id="catalog-source">ISBN-10／ISBN-13はopenBD、書名・著者は端末内のデモ候補を検索します。</p>
       <div class="catalog-results" id="catalog-results"></div>
     </div>
     <form class="add-view form-grid" data-add-view="manual" id="manual-form">
-      <label class="field span-2"><span>タイトル *</span><input name="title" required placeholder="本のタイトル"></label>
-      <label class="field"><span>著者 *</span><input name="author" required placeholder="著者名"></label>
+      <label class="field span-2"><span>タイトル *</span><input name="title" required maxlength="500" placeholder="本のタイトル"></label>
+      <label class="field"><span>著者 *</span><input name="author" required maxlength="300" placeholder="著者名"></label>
       <label class="field"><span>ジャンル</span><select name="genre"><option>文学・小説</option><option>自然科学</option><option>ビジネス</option><option>歴史</option><option>心理・思想</option><option>紀行・エッセイ</option><option>その他</option></select></label>
-      <label class="field"><span>ページ数</span><input name="pages" type="number" min="1" inputmode="numeric" placeholder="320"></label>
-      <label class="field"><span>読了日</span><input name="finishedAt" type="date" value="2026-08-28"></label>
+      <label class="field"><span>ページ数</span><input name="pages" type="number" min="1" max="100000" inputmode="numeric" placeholder="320"></label>
+      <label class="field"><span>読了日</span><input id="manual-finished-at" name="finishedAt" type="date"></label>
       <label class="field"><span>状態</span><select name="status"><option value="read">読んだ</option><option value="reading">読書中</option><option value="wishlist">読みたい</option></select></label>
       <label class="field"><span>評価</span><select name="rating"><option value="0">未評価</option><option value="5">5 - とても良い</option><option value="4">4 - 良い</option><option value="3">3 - ふつう</option><option value="2">2</option><option value="1">1</option></select></label>
       <button class="primary-button span-2 submit-button" type="submit"><i data-lucide="plus"></i>本棚に追加</button>

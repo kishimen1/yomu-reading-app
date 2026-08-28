@@ -3,6 +3,7 @@
   "short_name": "YOMU",
   "description": "読書記録と読書傾向の可視化を一つにまとめるAndroid対応アプリ",
   "lang": "ja",
+  "id": "./",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
@@ -11,8 +12,14 @@
   "theme_color": "#f4f6f3",
   "icons": [
     {
-      "src": "assets/app-icon.png",
-      "sizes": "1254x1254",
+      "src": "assets/app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/app-icon-512.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     }

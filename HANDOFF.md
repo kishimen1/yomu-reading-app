@@ -2,11 +2,9 @@
 
 更新日: 2026-08-28
 
-## 1. プロジェクト概要
+## 1. 現在地
 
-Android向け読書管理アプリ「YOMU」のモックアップ。iOSアプリ「読書管理ビブリア」の公開機能を要件の参考にしつつ、画面・名称・素材は複製せず、独自デザインの静的PWAとして実装している。
-
-最終目標は、読書記録、データエクスポート、BI風分析を備えたAndroidアプリを完成させ、Google Playで公開できる状態へ進めること。
+Android向け読書管理アプリ「YOMU」。静的モックから、Vite + TypeScript製PWAへ移行済み。独自デザイン・独自生成素材を使い、読書記録、データ移行、BI風分析、PWAオフライン利用を実装している。
 
 作業ディレクトリ:
 
@@ -14,224 +12,169 @@ Android向け読書管理アプリ「YOMU」のモックアップ。iOSアプリ
 C:\Users\ZA-KESSAN-11\Documents\読書管理アプリ
 ```
 
-注意: 現在このディレクトリはGitリポジトリではない。
+Git:
 
-## 2. 現在の実装
+- `main` ブランチで初期化済み。
+- 動作済み静的モックの基準コミットは `2d1be8a`。
+- テスト生成物 `artifacts/`、`dist/`、`node_modules/` はGit対象外。
 
-依存関係のないHTML/CSS/JavaScript製PWA。データはブラウザーの `localStorage` に保存する。
-
-実装済み:
+## 2. 実装済み
 
 - 読んだ本、読書中、読みたい本の切替
 - グリッド／リスト表示、AND検索、並び替え
-- カメラプレビュー、バーコード読取デモ、書誌検索デモ、手入力
+- 手入力、カメラプレビュー、バーコード読取デモ
+- openBDによるISBN-10／ISBN-13の実書誌検索
+- ISBN優先、ISBNなしは書名＋著者による重複検知
 - タイトル、著者、状態、読了日、評価、メモ、感想の編集
 - 本棚間の移動、共有、削除
-- 読了数、ページ数、平均評価、著者数
-- ジャンル円グラフ、月別読了数、評価分布、分析インサイト
-- UTF-8 BOM付きCSVエクスポート
+- 選択年／全期間の読了数、ページ数、平均評価、著者数
+- ジャンル円グラフ、12か月推移、評価分布
+- UTF-8 BOM付きYOMU CSVエクスポート
+- YOMU CSV、ビブリア14列CSVの自動判別インポート
 - JSON完全バックアップ／復元
+- スキーマv2保存とv1 localStorage／JSONからの非破壊移行
 - ライト／ダーク表示、年間目標設定
-- Service Workerによるオフラインキャッシュ
-- Android向けレスポンシブUI
+- 192x192／512x512 PWAアイコン、manifest `id`
+- Service Workerによる同一オリジンのオフラインキャッシュ
 
-主要ファイル:
+## 3. 技術構成
 
 | ファイル | 役割 |
 | --- | --- |
 | `index.html` | 画面構造、ダイアログ、PWAメタ情報 |
-| `styles.css` | モバイル／タブレット／デスクトップのUI |
-| `app.js` | サンプルデータ、状態管理、分析、入出力、画面操作 |
-| `manifest.json` | PWAマニフェスト |
-| `sw.js` | オフラインキャッシュ。現在 `yomu-shell-v2` |
-| `README.md` | 利用方法、本稼働構成、公開ロードマップ |
-| `tests/verify_app.py` | Playwrightによる主要導線の自動検証 |
-| `assets/lucide.min.js` | オフライン利用するLucideアイコン |
-| `assets/app-icon.png` | 生成した架空アプリアイコン |
-| `assets/book-cover-sprite.png` | 生成した架空書籍用書影スプライト |
+| `src/main.ts` | 状態管理、画面操作、分析、入出力 |
+| `src/data.ts` | 型、スキーマv2、正規化、移行、バックアップ |
+| `src/csv.ts` | CSV解析、ビブリア変換、重複検知 |
+| `src/openbd.ts` | ISBN検証、openBD API接続、応答変換 |
+| `src/styles.css` | モバイル／タブレット／デスクトップUI |
+| `public/manifest.json` | PWAマニフェスト |
+| `public/sw.js` | オフラインキャッシュ。現在 `yomu-shell-v4` |
+| `tests/verify_app.py` | Vite本番プレビューを使うPlaywright回帰テスト |
+| `package.json` | Vite、TypeScript、ビルド／テストコマンド |
 
-localStorageキー:
-
-```text
-yomu-reading-archive:v1
-yomu-settings:v1
-```
-
-## 3. 起動方法
-
-現在、PythonのHTTPサーバーが次の状態で起動している。
+主要localStorageキー:
 
 ```text
-0.0.0.0:8056
-確認結果: HTTP 200
-確認時PID: 46764
+yomu-reading-archive:v2
+yomu-settings:v2
 ```
 
-新しいセッションではプロセスが残っていると仮定せず、最初に確認する。
+旧 `:v1` キーは読み取り移行後も削除しない。移行テストもこの非破壊性を確認している。
+
+## 4. 起動・ビルド・検証
+
+開発サーバー:
 
 ```powershell
-netstat -ano | Select-String ':8056'
+npm install
+npm run dev
 ```
 
-起動していなければ、プロジェクト直下で実行する。
-
-```powershell
-python -m http.server 8056 --bind 0.0.0.0
-```
-
-PCからの確認:
+既定URL:
 
 ```text
 http://localhost:8056
 ```
 
-Androidからの確認:
-
-```text
-http://<PCの現在のIPv4アドレス>:8056
-```
-
-PCのIPv4アドレスはWi-Fi再接続やネットワーク切替で変わるため、毎回 `ipconfig` で確認する。Androidでは `localhost` を使わない。
-
-## 4. ネットワーク検証結果
-
-- 学内の全学用無線LANでは、PC自身からは開けるがAndroidから接続できなかった。
-- PythonのWindowsファイアウォール許可設定は存在した。
-- PCとAndroidをモバイルホットスポット経由で接続すると、Androidから正常に起動できた。
-- したがって、学内無線LANのAP isolation / Client isolation等による端末間通信制限が原因である可能性が高い。
-- 今後の通常試用は、モバイルホットスポットまたはHTTPS公開版で行う。
-- LAN内HTTPは表示確認用。PWAのインストール、Service Worker、カメラ利用を安定させるにはHTTPS公開が必要。
-
-## 5. npm修復結果
-
-当初、`npm` と `npx` はユーザー領域の不完全なnpmコピーを優先し、`npm-cli.js` / `npx-cli.js` の `MODULE_NOT_FOUND` で失敗していた。
-
-不完全なフォルダーを削除せず、次へ退避した。
-
-```text
-C:\Users\ZA-KESSAN-11\AppData\Roaming\npm\node_modules\npm.broken-backup-20260828
-```
-
-修復後の確認結果:
-
-```text
-node --version  -> v22.14.0
-npm --version   -> 10.9.2
-npx --version   -> 10.9.2
-npm ping        -> PONG 213ms
-```
-
-正規のnpmは `C:\Program Files\nodejs\node_modules\npm` に存在する。退避フォルダーは復旧が安定するまで削除しない。
-
-現時点ではプロジェクトに `package.json` やnpmパッケージは追加していない。
-
-## 6. 検証状況
-
-2026-08-28に次を実行し、成功している。
+型検査と本番ビルド:
 
 ```powershell
-node --check app.js
-python tests\verify_app.py
+npm run typecheck
+npm run build
 ```
 
-期待されるテスト結果:
+全回帰テスト:
+
+```powershell
+npm test
+```
+
+`npm test` は `dist/` を再生成し、Vite previewを `127.0.0.1:4173` で一時起動して終了時に停止する。
+
+2026-08-28の期待結果:
 
 ```text
 PASS: shelf, add/edit, analytics, exports, offline PWA, and 360/768/1440 layouts
 ```
 
-自動テスト内容:
+検証範囲:
 
-- 初期本棚12冊の表示
-- 読書中タブの切替
-- 手入力による本の追加
-- 詳細メモの更新
-- 分析値の再計算
-- CSV／JSONダウンロード
-- 360px、768px、1440pxで横スクロールがないこと
-- PWAマニフェスト
-- Service Workerキャッシュによるオフライン再読込
-- ブラウザーコンソールエラーがないこと
+- 360px、768px、1440pxで横スクロールなし
+- 追加・編集・検索・分析・CSV／JSON入出力
+- openBD検索はテスト内でAPI応答をモック
+- ビブリアCSVの改行入りフィールド、重複、無効行
+- v1からv2へのlocalStorage移行と値の上限補正
+- PWAマニフェスト、実アイコン寸法、オフライン再読込
+- ブラウザーコンソールエラーなし
 
-テストはローカルChromeを次のパスから起動する。
+## 5. 書誌・CSV仕様上の注意
 
-```text
-C:\Program Files\Google\Chrome\Application\chrome.exe
-```
+openBD:
 
-テスト用の画像とエクスポート結果は `artifacts/` に保存される。
+- `https://api.openbd.jp/v1/get?isbn=...` を使用。
+- openBDはISBN取得のみ。書名・著者キーワード検索は現状デモ候補。
+- 代替書誌へ移行済みのため未収録項目や書影欠落があり得る。
+- 外部書影はPWAキャッシュしない。URLだけを保存し、提供元の更新・削除を反映可能にする。
+- API失敗、未収録、8秒タイムアウト時も手入力可能。
 
-## 7. モックの既知の制約
+ビブリアCSV:
 
-- 書誌検索とバーコード読取結果はサンプルデータ。
-- カメラプレビューは利用できるが、ISBN画像認識は未接続。
-- データはブラウザーごとのlocalStorageに保存され、端末間同期しない。
+- 公式サポート記載のUTF-8、ヘッダーなし、14列形式を対象。
+- 1列目タイトル、3列目著者、6列目ISBN、7列目日付、8列目メモ、9列目感想、12列目登録日、13列目本棚、14列目評価を使用。
+- 12列未満またはタイトルなしの行は無効行として集計。
+- ISBN一致を優先し、ISBNなしは正規化した書名＋著者で重複判定。
+
+## 6. ネットワーク確認結果
+
+- 学内の全学用無線LANでは、PC自身からは開けるがAndroidからLAN内HTTPへ接続できなかった。
+- モバイルホットスポット経由ではAndroidから正常に起動できた。
+- 学内無線LANのAP isolation / Client isolation等による端末間通信制限の可能性が高い。
+- LAN内HTTPは表示確認用。PWAインストール、Service Worker、カメラ実機確認にはHTTPS公開版を使う。
+
+## 7. 既知の制約
+
+- HTTPS公開先は未決定・未公開。
+- AndroidパッケージIDが未決定のためCapacitorプロジェクトは未生成。
+- ISBN画像認識は未接続。カメラプレビューとサンプル読取まで。
+- 端末DBはlocalStorage。SQLite、全文検索、DBマイグレーションは未実装。
 - ログイン、クラウド同期、Google Drive／Dropboxバックアップは未実装。
-- CSVはエクスポートのみ。復元はJSONのみ。
-- PWAアイコンは1254x1254の生成画像1点。正式な公開前に192x192、512x512、adaptive icon用素材を用意する。
-- 年次分析は現状2026年を前提とした箇所がある。日付依存処理は本稼働前に動的化する。
-- 現在の静的構成はプロトタイプ向け。本稼働では型、DBマイグレーション、APIエラー処理を追加する。
+- openBDにない書籍のキーワード実検索フォールバックは未実装。
+- 外部書影URLはネットワーク切断時に表示できないが、記録本文はオフライン利用可能。
 
-## 8. 重要な設計判断
+## 8. 次の推奨作業（優先順）
 
-- デザインは静かで編集的な日本語UI。絵文字は使わずLucideアイコンを利用。
-- 架空書影とアイコンは本プロジェクト用に新規生成し、実在書籍やビブリアの素材を使用していない。
-- ビブリアの公開機能を参考にしたが、独自アプリとして実装する。
-- 分析に使えるよう、CSVではID、書名、著者、ISBN、ジャンル、状態、評価、ページ数、読了日、登録日、メモ、感想を出力する。
-- ユーザーデータはまず端末内保存を基本とし、クラウド同期を追加する場合は選択式にする方向。
+1. HTTPSプレビュー公開先を決め、学内Wi-FiのAndroid実機でPWAインストール・カメラ・オフラインを確認する。
+2. 正式アプリ名、AndroidパッケージID、公開主体、クラウド同期の要否を確定する。
+3. Capacitorを導入しAndroidプロジェクトを生成する。
+4. SQLiteスキーマとWebスキーマv2からの初回移行を実装する。
+5. ML Kit Barcode Scanning、ネイティブ共有、端末ファイル保存を接続する。
+6. openBD未収録時の書誌フォールバックを決める。
+7. TalkBack、200%文字拡大、5000冊性能、Android実機回帰を追加する。
+8. Play Console内部テスト、クローズドテスト、公開へ進む。
 
-## 9. 次の推奨作業
-
-優先順:
-
-1. Gitを初期化し、現在の動作済みモックを最初のコミットとして保存する。
-2. HTTPSのプレビュー環境へ公開し、学内無線LANからAndroid実機でアクセスできるようにする。
-3. PWA用192x192／512x512アイコンと `manifest.json` の `id` を追加する。
-4. Vite + TypeScriptへ段階的に移行し、現在の動作を維持する回帰テストを通す。
-5. データスキーマ、バージョン、マイグレーション方針を確定する。
-6. ビブリア互換CSVインポート、重複検知、入力値検証を追加する。
-7. openBD等の書誌APIと実ISBN検索を接続する。
-8. CapacitorでAndroidプロジェクトを生成する。
-9. SQLite、ML Kitバーコード、ネイティブ共有、端末ファイル保存を接続する。
-10. Android実機テスト、Play Console内部テスト、クローズドテスト、公開へ進む。
-
-Capacitor導入の基本コマンドは次のとおり。ただし、実行前にVite移行とパッケージ名の決定を推奨する。
-
-```powershell
-npm install @capacitor/cli @capacitor/core
-npx cap init
-npm install @capacitor/android
-npx cap add android
-npx cap sync android
-npx cap open android
-```
-
-## 10. 新セッション開始時の確認チェックリスト
+## 9. 次回開始時チェック
 
 ```powershell
 Get-Location
-Get-ChildItem -Force
+git status --short --branch
 node --version
 npm --version
-npx --version
-netstat -ano | Select-String ':8056'
-node --check app.js
-python tests\verify_app.py
+npm run typecheck
+npm test
 ```
 
-注意事項:
+注意:
 
-- テスト実行前に8056番のサーバーが必要。
-- ユーザーの既存変更を勝手に戻さない。
-- 現在はGit未初期化なので、変更前にファイル状態を必ず確認する。
-- 学内Wi-FiでLAN内サーバーへ接続できないことをアプリ不具合と誤認しない。
-- 本稼働作業に入る前に、アプリ名、パッケージ名、クラウド同期の要否、公開範囲をユーザーと確定する。
+- ユーザーの既存変更を戻さない。
+- `dist/` は生成物なので直接編集しない。
+- 旧v1保存データを削除しない。
+- openBD書影をService Workerで永続キャッシュしない。
+- Capacitor実行前にパッケージIDをユーザーと確定する。
 
-## 11. 参考URL
+## 10. 参考URL
 
-- 読書管理ビブリア App Store: https://apps.apple.com/jp/app/id894377244
-- 読書管理ビブリア サポート: https://biblia978.com/support/
+- 読書管理ビブリア CSV仕様: https://biblia978.com/support/articles/15/
+- openBD: https://openbd.jp/
+- openBD API仕様: https://openbd.jp/spec/
 - Capacitor公式: https://capacitorjs.com/docs
 - Android公開準備: https://developer.android.com/studio/publish/preparing
-- Google Play target API要件: https://developer.android.com/google/play/requirements/target-sdk
-
