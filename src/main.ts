@@ -17,6 +17,7 @@ import {
 } from "./data";
 import { hasDuplicateBook, mergeImportedBooks, parseBooksCsv } from "./csv";
 import { fetchOpenBdBook, isValidIsbn, normalizeIsbn } from "./openbd";
+import { searchOpenLibraryBooks } from "./book-search";
 
 type ShelfView = "grid" | "list";
 type ScreenName = "shelf" | "analytics" | "settings";
@@ -27,17 +28,32 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 }
 
+interface DetectedBarcode {
+  rawValue: string;
+}
+
+interface BarcodeDetectorInstance {
+  detect(source: HTMLVideoElement): Promise<DetectedBarcode[]>;
+}
+
+interface BarcodeDetectorConstructor {
+  new(options?: { formats?: string[] }): BarcodeDetectorInstance;
+}
+
 declare global {
   interface Window {
     lucide?: {
       createIcons(options?: { attrs?: Record<string, string | number> }): void;
     };
+    BarcodeDetector?: BarcodeDetectorConstructor;
   }
 }
 
 const COVER_POSITIONS = ["0% 0%", "50% 0%", "100% 0%", "0% 100%", "50% 100%", "100% 100%"]; 
 const GENRE_COLORS = ["#256b54", "#e4513b", "#456a82", "#c3912f", "#7b657f", "#88908b"];
 let visibleCatalogBooks: CatalogBook[] = [];
+let visibleManualSearchBooks: CatalogBook[] = [];
+let selectedManualCatalogBook: CatalogBook | null = null;
 let books = loadBooks();
 let settings = loadSettings();
 let activeFilter: BookStatus = "read";
@@ -46,6 +62,10 @@ let query = "";
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogRequest: AbortController | null = null;
+let manualSearchRequest: AbortController | null = null;
+let scannerStream: MediaStream | null = null;
+let scannerTimer: ReturnType<typeof setInterval> | null = null;
+let scannerDetectionBusy = false;
 let deferredInstallPrompt: BeforeInstallPromptEvent | null = null;
 let installCompletedThisSession = false;
 
@@ -197,7 +217,7 @@ function renderEmptyState(resultCount: number) {
   if (isFirstBook) {
     empty.classList.add("is-first-book");
     title.textContent = "最初の一冊から、あなたの本棚へ";
-    copy.textContent = "ISBNから書誌情報を取得するか、手入力で読書記録を始められます。記録はこの端末だけに保存されます。";
+    copy.textContent = "バーコードをカメラで読むか、書名・著者から探して読書記録を始められます。記録はこの端末だけに保存されます。";
     return;
   }
 
@@ -393,10 +413,18 @@ function openAddDialog(mode: AddMode = "search") {
 
 function closeDialog(id: string) {
   const dialog = document.getElementById(id) as HTMLDialogElement | null;
+  if (id === "add-dialog") {
+    stopBarcodeScanner();
+    catalogRequest?.abort();
+    catalogRequest = null;
+    manualSearchRequest?.abort();
+    manualSearchRequest = null;
+  }
   if (dialog?.open) dialog.close();
 }
 
 function setAddMode(mode: AddMode) {
+  if (mode !== "search") stopBarcodeScanner();
   $$('[data-add-mode]').forEach(button => button.classList.toggle("is-active", button.dataset.addMode === mode));
   $$('[data-add-view]').forEach(view => view.classList.toggle("is-active", view.dataset.addView === mode));
   if (mode === "search" && !$<HTMLInputElement>("#catalog-search").value) {
@@ -453,6 +481,146 @@ async function searchCatalog(searchTerm: string) {
 function scheduleCatalogSearch(searchTerm: string) {
   if (catalogSearchTimer !== null) clearTimeout(catalogSearchTimer);
   catalogSearchTimer = setTimeout(() => searchCatalog(searchTerm), 350);
+}
+
+function renderManualSearchResults(results: CatalogBook[], emptyMessage = "タイトルや著者を入力して検索してください。", selectedIndex = -1) {
+  $("#manual-search-results").innerHTML = results.map((book, index) => {
+    const metadata = [book.publisher, book.pages ? `${book.pages.toLocaleString("ja-JP")}ページ` : "", book.isbn ? `ISBN ${book.isbn}` : "ISBNなし"].filter(Boolean).join(" · ");
+    return `
+      <article class="manual-search-result ${index === selectedIndex ? "is-selected" : ""}">
+        <div class="result-cover" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">${book.coverUrl ? `<img src="${escapeHtml(book.coverUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}</div>
+        <span><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)}<br>${escapeHtml(metadata)}</small></span>
+        <button type="button" data-manual-result-index="${index}" aria-label="${escapeHtml(book.title)}を入力欄に反映">${index === selectedIndex ? '<i data-lucide="check"></i><span>選択済み</span>' : '<i data-lucide="arrow-down-to-line"></i><span>選択</span>'}</button>
+      </article>`;
+  }).join("") || `<p class="catalog-empty">${escapeHtml(emptyMessage)}</p>`;
+  iconize();
+}
+
+async function searchManualBooks(searchTerm: string) {
+  const term = searchTerm.trim();
+  manualSearchRequest?.abort();
+  manualSearchRequest = null;
+
+  if (!term) {
+    visibleManualSearchBooks = [];
+    renderManualSearchResults([], "タイトル、著者、出版社、ISBNのいずれかを入力してください。");
+    $("#manual-search-source").textContent = "検索語を入力すると、Open Libraryから候補を探します。";
+    return;
+  }
+
+  const request = new AbortController();
+  manualSearchRequest = request;
+  $("#manual-search-source").textContent = "本の候補を検索しています…";
+  $("#manual-search-results").innerHTML = '<p class="catalog-empty">Open Libraryを検索中です。</p>';
+
+  try {
+    const results = await searchOpenLibraryBooks(term, request.signal);
+    if (request.signal.aborted) return;
+    visibleManualSearchBooks = results;
+    renderManualSearchResults(results, "候補が見つかりませんでした。入力欄へ直接記入できます。");
+    $("#manual-search-source").textContent = results.length
+      ? `${results.length}件の候補です。選ぶと下の入力欄へ反映します。`
+      : "候補が見つかりませんでした。検索語を変えるか、下の入力欄へ直接記入してください。";
+  } catch (error) {
+    if (request.signal.aborted) return;
+    visibleManualSearchBooks = [];
+    renderManualSearchResults([], "検索できませんでした。入力欄へ直接記入できます。");
+    $("#manual-search-source").textContent = error instanceof Error ? error.message : "書籍検索へ接続できませんでした。";
+  } finally {
+    if (manualSearchRequest === request) manualSearchRequest = null;
+  }
+}
+
+function selectManualSearchBook(index: number) {
+  const book = visibleManualSearchBooks[index];
+  if (!book) return;
+  selectedManualCatalogBook = book;
+  const form = $<HTMLFormElement>("#manual-form");
+  $<HTMLInputElement>('[name="title"]', form).value = book.title;
+  $<HTMLInputElement>('[name="author"]', form).value = book.author;
+  $<HTMLInputElement>('[name="publisher"]', form).value = book.publisher || "";
+  $<HTMLInputElement>('[name="isbn"]', form).value = book.isbn;
+  $<HTMLInputElement>('[name="genre"]', form).value = book.genre || "その他";
+  $<HTMLInputElement>('[name="pages"]', form).value = book.pages ? String(book.pages) : "";
+  renderManualSearchResults(visibleManualSearchBooks, undefined, index);
+  $("#manual-search-source").textContent = `「${book.title}」を入力欄へ反映しました。内容を確認してから追加してください。`;
+  showToast("書誌情報を入力欄へ反映しました");
+}
+
+function stopBarcodeScanner() {
+  if (scannerTimer !== null) {
+    clearInterval(scannerTimer);
+    scannerTimer = null;
+  }
+  scannerStream?.getTracks().forEach(track => track.stop());
+  scannerStream = null;
+  scannerDetectionBusy = false;
+  const video = document.getElementById("barcode-video") as HTMLVideoElement | null;
+  if (video) video.srcObject = null;
+  const scanner = document.getElementById("barcode-scanner");
+  if (scanner) scanner.hidden = true;
+  const button = document.getElementById("start-barcode-scan") as HTMLButtonElement | null;
+  if (button) button.disabled = false;
+}
+
+function cameraErrorMessage(error: unknown): string {
+  if (error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError")) return "カメラの使用が許可されていません。ブラウザーの権限を確認するか、ISBNを入力してください。";
+  if (error instanceof DOMException && error.name === "NotFoundError") return "利用できるカメラが見つかりません。ISBNを入力してください。";
+  return "カメラを開始できませんでした。ISBNを入力して検索できます。";
+}
+
+async function startBarcodeScanner() {
+  stopBarcodeScanner();
+  const button = $<HTMLButtonElement>("#start-barcode-scan");
+  const scanner = $("#barcode-scanner");
+  const status = $("#barcode-status");
+  const video = $<HTMLVideoElement>("#barcode-video");
+  button.disabled = true;
+
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error("camera-unsupported");
+    if (!window.BarcodeDetector) throw new Error("barcode-unsupported");
+
+    scanner.hidden = false;
+    status.textContent = "カメラを起動しています…";
+    scannerStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+    });
+    video.srcObject = scannerStream;
+    await video.play();
+    status.textContent = "本の裏表紙にあるISBNバーコードを枠に合わせてください。";
+
+    const detector = new window.BarcodeDetector({ formats: ["ean_13"] });
+    scannerTimer = setInterval(() => {
+      if (scannerDetectionBusy) return;
+      scannerDetectionBusy = true;
+      void detector.detect(video).then(codes => {
+        const isbn = codes.map(code => normalizeIsbn(code.rawValue)).find(value => value.length === 13 && /^(978|979)/.test(value) && isValidIsbn(value));
+        if (!isbn) {
+          if (codes.length) status.textContent = "ISBNバーコードではありません。978または979で始まるバーコードを写してください。";
+          return;
+        }
+        $<HTMLInputElement>("#catalog-search").value = isbn;
+        stopBarcodeScanner();
+        showToast("ISBNを読み取りました");
+        void searchCatalog(isbn);
+      }).catch(() => {
+        // A frame can be unreadable while the camera is moving. Keep scanning.
+      }).finally(() => {
+        scannerDetectionBusy = false;
+      });
+    }, 350);
+  } catch (error) {
+    const message = error instanceof Error && error.message === "barcode-unsupported"
+      ? "このブラウザーはバーコード読み取りに対応していません。ISBNを入力して検索してください。"
+      : error instanceof Error && error.message === "camera-unsupported"
+        ? "この環境ではカメラを利用できません。HTTPSの公開版で開くか、ISBNを入力してください。"
+        : cameraErrorMessage(error);
+    stopBarcodeScanner();
+    $("#catalog-source").textContent = message;
+    showToast(message);
+  }
 }
 
 function addCatalogBook(catalogBook: CatalogBook, source = "検索") {
@@ -682,6 +850,9 @@ function initializeEvents() {
       if (book) addCatalogBook(book, book.source === "openbd" ? "openBD" : "検索");
     }
 
+    const manualResultButton = target.closest<HTMLElement>("[data-manual-result-index]");
+    if (manualResultButton?.dataset.manualResultIndex) selectManualSearchBook(Number(manualResultButton.dataset.manualResultIndex));
+
     const ratingButton = target.closest<HTMLElement>(".rating-control [data-rating]");
     if (ratingButton) {
       const rating = Number(ratingButton.dataset.rating);
@@ -714,6 +885,14 @@ function initializeEvents() {
   $("#sort-books").addEventListener("change", renderBooks);
   $<HTMLSelectElement>("#analytics-year").addEventListener("change", renderAnalytics);
   $<HTMLInputElement>("#catalog-search").addEventListener("input", event => scheduleCatalogSearch((event.currentTarget as HTMLInputElement).value));
+  $("#start-barcode-scan").addEventListener("click", () => { void startBarcodeScanner(); });
+  $("#stop-barcode-scan").addEventListener("click", stopBarcodeScanner);
+  $("#manual-book-search").addEventListener("click", () => { void searchManualBooks($<HTMLInputElement>("#manual-book-query").value); });
+  $<HTMLInputElement>("#manual-book-query").addEventListener("keydown", event => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    void searchManualBooks((event.currentTarget as HTMLInputElement).value);
+  });
   $("#empty-add-isbn").addEventListener("click", () => openAddDialog("search"));
   $("#empty-add-manual").addEventListener("click", () => openAddDialog("manual"));
   $("#empty-clear-search").addEventListener("click", () => {
@@ -742,7 +921,33 @@ function initializeEvents() {
     const rawIsbn = String(data.get("isbn") || "").trim();
     isbnInput.setCustomValidity(rawIsbn && !isValidIsbn(rawIsbn) ? "ISBN-10またはISBN-13を確認してください" : "");
     if (!form.reportValidity()) return;
-    const candidate = normalizeBook({ id: crypto.randomUUID(), title: data.get("title"), author: data.get("author"), isbn: rawIsbn ? normalizeIsbn(rawIsbn) : "", genre: data.get("genre"), pages: data.get("pages"), status, rating: data.get("rating"), finishedAt: status === "read" ? data.get("finishedAt") || todayIso() : "", createdAt: todayIso(), notes: data.get("notes"), review: data.get("review"), cover: books.length % 6, source: "manual" });
+    const title = String(data.get("title") || "").trim();
+    const author = String(data.get("author") || "").trim();
+    const normalizedInputIsbn = rawIsbn ? normalizeIsbn(rawIsbn) : "";
+    const selected = selectedManualCatalogBook;
+    const selectedMatches = Boolean(selected && (
+      (normalizedInputIsbn && selected.isbn && normalizedInputIsbn === normalizeIsbn(selected.isbn))
+      || (title.toLocaleLowerCase("ja") === selected.title.toLocaleLowerCase("ja") && author.toLocaleLowerCase("ja") === selected.author.toLocaleLowerCase("ja"))
+    ));
+    const notes = String(data.get("notes") || "");
+    const candidate = normalizeBook({
+      id: crypto.randomUUID(),
+      title,
+      author,
+      isbn: normalizedInputIsbn,
+      genre: data.get("genre"),
+      pages: data.get("pages"),
+      publisher: data.get("publisher"),
+      status,
+      rating: data.get("rating"),
+      finishedAt: status === "read" ? data.get("finishedAt") || todayIso() : "",
+      createdAt: todayIso(),
+      notes: notes || (selectedMatches && settings.synopsis ? selected?.synopsis || "" : ""),
+      review: data.get("review"),
+      cover: selectedMatches && selected ? selected.cover : books.length % 6,
+      coverUrl: selectedMatches ? selected?.coverUrl || "" : "",
+      source: selectedMatches ? "catalog" : "manual",
+    });
     if (!candidate) return;
     if (hasDuplicateBook(books, candidate)) {
       showToast(`「${candidate.title}」はすでに本棚にあります`);
@@ -752,6 +957,11 @@ function initializeEvents() {
     persist();
     renderAll();
     form.reset();
+    selectedManualCatalogBook = null;
+    visibleManualSearchBooks = [];
+    $<HTMLInputElement>("#manual-book-query").value = "";
+    $("#manual-search-source").textContent = "候補を選ぶと、下の入力欄へ書誌情報を反映します。";
+    renderManualSearchResults([]);
     $<HTMLInputElement>("#manual-finished-at").value = todayIso();
     syncManualFinishedAt();
     closeDialog("add-dialog");
@@ -792,6 +1002,7 @@ function initializeEvents() {
   $$<HTMLDialogElement>('dialog').forEach(dialog => dialog.addEventListener("click", event => {
     if (event.target === dialog) closeDialog(dialog.id);
   }));
+  $<HTMLDialogElement>("#add-dialog").addEventListener("close", stopBarcodeScanner);
 }
 
 function initialize() {
@@ -803,6 +1014,7 @@ function initialize() {
   initializeEvents();
   initializeInstallExperience();
   renderCatalogResults([], "ISBNを入力すると、openBDから書誌情報を取得します。");
+  renderManualSearchResults([]);
   renderAll();
   setTimeout(iconize, 150);
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});

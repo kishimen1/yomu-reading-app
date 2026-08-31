@@ -95,10 +95,10 @@
           <span class="empty-mark"><i data-lucide="book-open"></i></span>
           <span class="section-kicker">YOUR FIRST SHELF</span>
           <h2 id="empty-title">最初の一冊から、あなたの本棚へ</h2>
-          <p id="empty-copy">ISBNから書誌情報を取得するか、手入力で読書記録を始められます。</p>
+          <p id="empty-copy">バーコードをカメラで読むか、書名・著者から探して読書記録を始められます。</p>
           <div class="empty-actions">
-            <button class="primary-button" id="empty-add-isbn" type="button"><i data-lucide="search"></i><span>ISBNから登録</span></button>
-            <button class="secondary-button" id="empty-add-manual" type="button"><i data-lucide="pencil-line"></i><span>手入力で登録</span></button>
+            <button class="primary-button" id="empty-add-isbn" type="button"><i data-lucide="scan-line"></i><span>ISBNから登録</span></button>
+            <button class="secondary-button" id="empty-add-manual" type="button"><i data-lucide="text-search"></i><span>書名・著者から探す</span></button>
             <button class="text-button" id="empty-clear-search" type="button" hidden>検索をクリア</button>
           </div>
         </div>
@@ -185,7 +185,7 @@
               <input id="import-csv-file" type="file" accept="text/csv,.csv" hidden>
             </div>
             <div class="import-summary" id="import-summary" role="status" aria-live="polite" hidden></div>
-            <div class="data-note"><i data-lucide="shield-check"></i><p><strong>プライバシーファースト</strong><br>読書記録は端末内に保存され、アカウント登録やクラウド同期は行いません。ISBN検索時だけ、入力したISBNをopenBDへ送信します。</p></div>
+            <div class="data-note"><i data-lucide="shield-check"></i><p><strong>プライバシーファースト</strong><br>読書記録は端末内に保存され、アカウント登録やクラウド同期は行いません。ISBN検索時はopenBDへ、書名・著者検索時はOpen Libraryへ検索語を送信します。カメラ映像は端末外へ送信しません。</p></div>
           </section>
           <section class="settings-section">
             <div class="settings-title"><i data-lucide="sliders-horizontal"></i><div><h2>表示と記録</h2><p>日々の記録方法を調整します。</p></div></div>
@@ -194,7 +194,7 @@
             <label class="setting-row"><div><strong>あらすじをメモに追加</strong><span>書誌取得時に自動入力</span></div><input class="switch" type="checkbox" id="synopsis-toggle" checked></label>
           </section>
           <section class="settings-section about-section">
-            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>PWA 1.0.0</span></div></div>
+            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>PWA 1.1.0</span></div></div>
             <p>読書の記憶を、あとから読み解ける記録へ。</p>
             <span class="release-badge">LOCAL FIRST</span>
           </section>
@@ -214,20 +214,47 @@
     <div class="dialog-handle" aria-hidden="true"></div>
     <header class="dialog-header"><div><span class="section-kicker">NEW RECORD</span><h2>本を追加</h2></div><button class="icon-button" data-close="add-dialog" type="button" aria-label="閉じる"><i data-lucide="x"></i></button></header>
     <div class="segmented add-modes" role="tablist" aria-label="追加方法">
-      <button class="is-active" data-add-mode="search" role="tab"><i data-lucide="search"></i>ISBN検索</button>
-      <button data-add-mode="manual" role="tab"><i data-lucide="pencil-line"></i>手入力</button>
+      <button class="is-active" data-add-mode="search" role="tab"><i data-lucide="scan-line"></i>ISBN・カメラ</button>
+      <button data-add-mode="manual" role="tab"><i data-lucide="text-search"></i>書名・手入力</button>
     </div>
     <div class="add-view is-active" data-add-view="search">
       <div class="catalog-controls">
         <label class="field"><span>ISBN-10 / ISBN-13</span><div class="input-with-icon"><i data-lucide="search"></i><input id="catalog-search" type="search" inputmode="text" autocomplete="off" placeholder="例: 9784873113364" maxlength="30"></div></label>
         <label class="field catalog-status"><span>登録先</span><select id="catalog-status"><option value="read">読んだ</option><option value="reading">読書中</option><option value="wishlist">読みたい</option></select></label>
       </div>
+      <div class="scan-entry">
+        <button class="secondary-button scan-button" id="start-barcode-scan" type="button"><i data-lucide="camera"></i><span>カメラでバーコードを読む</span></button>
+        <p><i data-lucide="shield-check"></i>映像はこの端末内だけで処理され、保存・送信されません。</p>
+      </div>
+      <section class="barcode-scanner" id="barcode-scanner" aria-label="ISBNバーコード読み取り" hidden>
+        <div class="scanner-viewport">
+          <video id="barcode-video" autoplay muted playsinline aria-label="カメラ映像"></video>
+          <div class="scanner-guide" aria-hidden="true"><span></span></div>
+        </div>
+        <div class="scanner-footer">
+          <p id="barcode-status" role="status" aria-live="polite">本の裏表紙にあるISBNバーコードを枠に合わせてください。</p>
+          <button class="text-button" id="stop-barcode-scan" type="button">カメラを止める</button>
+        </div>
+      </section>
       <p class="catalog-source" id="catalog-source">ISBN検索はopenBDを利用します。未収録の場合は手入力で登録できます。</p>
       <div class="catalog-results" id="catalog-results"></div>
     </div>
     <form class="add-view form-grid" data-add-view="manual" id="manual-form">
+      <section class="manual-search-card span-2" aria-labelledby="manual-search-title">
+        <div class="manual-search-heading">
+          <div><span class="section-kicker">FIND A BOOK</span><h3 id="manual-search-title">書名・著者から入力</h3></div>
+          <span>任意</span>
+        </div>
+        <div class="manual-search-row">
+          <label class="field"><span>タイトル・著者・出版社・ISBN</span><div class="input-with-icon"><i data-lucide="text-search"></i><input id="manual-book-query" type="search" autocomplete="off" placeholder="例: 吾輩は猫である 夏目漱石" maxlength="300"></div></label>
+          <button class="secondary-button" id="manual-book-search" type="button"><i data-lucide="search"></i><span>本を検索</span></button>
+        </div>
+        <p class="manual-search-source" id="manual-search-source" role="status" aria-live="polite">候補を選ぶと、下の入力欄へ書誌情報を反映します。</p>
+        <div class="manual-search-results" id="manual-search-results"></div>
+      </section>
       <label class="field span-2"><span>タイトル *</span><input name="title" required maxlength="500" placeholder="本のタイトル"></label>
       <label class="field"><span>著者 *</span><input name="author" required maxlength="300" placeholder="著者名"></label>
+      <label class="field"><span>出版社</span><input name="publisher" maxlength="300" placeholder="任意"></label>
       <label class="field"><span>ISBN</span><input name="isbn" maxlength="30" inputmode="text" placeholder="任意"></label>
       <label class="field"><span>ジャンル</span><input name="genre" list="genre-options" maxlength="100" value="その他"></label>
       <label class="field"><span>ページ数</span><input name="pages" type="number" min="0" max="100000" inputmode="numeric" placeholder="320"></label>

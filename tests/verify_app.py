@@ -92,11 +92,38 @@ def run() -> None:
         page.wait_for_timeout(250)
         page.screenshot(path=str(ARTIFACTS / "mobile-empty-shelf.png"), full_page=True)
 
-        # Register a complete reading record manually, then prove it survives reload.
+        # Search by title/author, reflect the selected metadata into the manual form,
+        # then register a complete reading record and prove it survives reload.
+        page.route(
+            "https://openlibrary.org/search.json?*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "numFound": 1,
+                    "docs": [{
+                        "key": "/works/OL-YOMU-1W",
+                        "title": "境界を歩く",
+                        "author_name": ["佐伯 凛"],
+                        "publisher": ["検索出版社"],
+                        "isbn": ["9784101010014"],
+                        "number_of_pages_median": 180,
+                    }],
+                }, ensure_ascii=False),
+            ),
+        )
         page.locator("#empty-add-manual").click()
         form = page.locator("#manual-form")
-        form.locator("[name=title]").fill("境界を歩く")
-        form.locator("[name=author]").fill("佐伯 凛")
+        page.locator("#manual-book-query").fill("境界を歩く 佐伯 凛")
+        page.locator("#manual-book-search").click()
+        manual_result = page.get_by_role("button", name="境界を歩くを入力欄に反映")
+        manual_result.wait_for()
+        page.screenshot(path=str(ARTIFACTS / "mobile-title-author-search.png"), full_page=True)
+        manual_result.click()
+        assert form.locator("[name=title]").input_value() == "境界を歩く"
+        assert form.locator("[name=author]").input_value() == "佐伯 凛"
+        assert form.locator("[name=publisher]").input_value() == "検索出版社"
+        assert form.locator("[name=isbn]").input_value() == "9784101010014"
         form.locator("[name=genre]").fill("文学・小説")
         form.locator("[name=pages]").fill("180")
         form.locator("[name=finishedAt]").fill(today)
@@ -154,9 +181,37 @@ def run() -> None:
         )
         page.locator("#bottom-add").click()
         page.locator("#catalog-status").select_option("wishlist")
-        page.locator("#catalog-search").fill(openbd_isbn)
+        page.evaluate(
+            f"""() => {{
+                const canvas = document.createElement('canvas');
+                canvas.width = 320;
+                canvas.height = 180;
+                const context = canvas.getContext('2d');
+                let frame = 0;
+                window.__yomuCameraTestTimer = window.setInterval(() => {{
+                    context.fillStyle = frame++ % 2 ? '#111' : '#222';
+                    context.fillRect(0, 0, canvas.width, canvas.height);
+                }}, 100);
+                const stream = canvas.captureStream(5);
+                window.__yomuCameraTestCanvas = canvas;
+                Object.defineProperty(navigator, 'mediaDevices', {{
+                    configurable: true,
+                    value: {{ getUserMedia: async () => stream }},
+                }});
+                window.BarcodeDetector = class {{
+                    async detect() {{
+                        await new Promise(resolve => setTimeout(resolve, 700));
+                        return [{{ rawValue: '{openbd_isbn}' }}];
+                    }}
+                }};
+            }}"""
+        )
+        page.locator("#start-barcode-scan").click()
+        page.locator("#barcode-scanner").wait_for()
+        page.screenshot(path=str(ARTIFACTS / "mobile-isbn-camera.png"), full_page=True)
         result_button = page.get_by_role("button", name="型で育てる読書記録を追加")
         result_button.wait_for()
+        assert page.locator("#catalog-search").input_value() == openbd_isbn
         result_button.click()
         page.locator('[data-filter="wishlist"]').click()
         assert page.locator("#book-grid .book-card").count() == 1
@@ -331,7 +386,7 @@ def run() -> None:
         pwa_context.close()
         browser.close()
 
-    print("PASS: empty first run, real records, ISBN/manual flows, migration, exports, offline PWA, and responsive layouts")
+    print("PASS: camera ISBN, title/author search, manual records, migration, exports, offline PWA, and responsive layouts")
 
 
 if __name__ == "__main__":

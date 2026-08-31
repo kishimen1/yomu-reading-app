@@ -1,10 +1,10 @@
 # YOMU 読書記録PWA 引継書
 
-更新日: 2026-08-28
+更新日: 2026-08-31
 
 ## 1. 現在地
 
-YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHTTPS公開済みで、Androidのホーム画面追加も実機確認済み。v1.0.0では、初回から実際の読書記録を登録・保存・編集・分析・バックアップできる状態を目標とする。
+YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHTTPS公開済みで、Androidのホーム画面追加も実機確認済み。v1.1.0では、カメラによるISBN登録と書名・著者検索を加え、実際の読書記録をより少ない入力で登録できる。
 
 - 作業ディレクトリ: `C:\Users\ZA-KESSAN-11\Documents\読書管理アプリ`
 - ブランチ: `main`
@@ -22,6 +22,8 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 - 利用者の既存記録、旧v1キー、v1から移行した記録を保持
 - 読んだ／読書中／読みたい、グリッド／リスト、AND検索、並び替え
 - openBDによるISBN-10／ISBN-13の実書誌検索と登録先選択
+- 対応ブラウザーのBarcodeDetectorによるISBN-13（EAN-13）カメラ読み取り
+- Open Libraryによる書名・著者・出版社・ISBN検索と手入力欄への候補反映
 - 手入力によるISBN、ジャンル、ページ数、状態、読了日、評価、メモ、感想の登録
 - 詳細画面でタイトル、著者、ISBN、ジャンル、ページ数、出版社、状態、読了日、評価、メモ、感想を編集
 - ISBN優先、ISBNなしは書名＋著者による重複検知
@@ -41,9 +43,10 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 | `src/data.ts` | 型、スキーマv2、正規化、v1移行、旧デモ除去 |
 | `src/csv.ts` | CSV解析、ビブリア変換、重複検知 |
 | `src/openbd.ts` | ISBN検証、openBD API接続 |
+| `src/book-search.ts` | Open Library検索、書誌データ正規化 |
 | `src/styles.css` | モバイル／タブレット／デスクトップUI |
 | `public/manifest.json` | PWAマニフェスト |
-| `public/sw.js` | オフラインキャッシュ `yomu-shell-v6` |
+| `public/sw.js` | オフラインキャッシュ `yomu-shell-v7` |
 | `.github/workflows/deploy-pages.yml` | `main` push時のGitHub Pages公開 |
 | `tests/verify_app.py` | 本番プレビューを使うPlaywright回帰テスト |
 
@@ -85,15 +88,17 @@ npm test
 ## 5. 保存・プライバシー
 
 - 読書記録は利用者の端末内に保存し、GitHubには送らない。
-- ISBN検索時だけ入力したISBNをopenBDへ送る。
+- ISBN検索時は入力したISBNをopenBDへ、書名・著者検索時は検索語をOpen Libraryへ送る。
+- カメラ映像はブラウザー内で処理し、保存・送信しない。
 - 機種変更、アプリ削除、ブラウザーデータ削除の前にJSON完全バックアップが必要。
 - 外部書影URLは永続キャッシュしない。書影がなくても記録本文は保持する。
 
 ## 6. 既知の制約
 
 - ログイン、端末間同期、クラウドバックアップは未実装。
-- カメラによるバーコード画像認識は未実装。ISBNは数字で入力する。
-- openBDに未収録の本は手入力が必要。
+- カメラ読み取りはHTTPSとBarcodeDetector対応ブラウザーが必要。非対応時はISBN入力へ戻る。
+- openBD／Open Libraryに未収録の本は直接入力が必要。
+- Open Libraryの候補は作品単位の情報を含むため、版・ページ数・出版社を登録前に確認する。
 - localStorageを端末DBとして使うため、大量データ向けSQLiteや全文検索は未実装。
 - ブラウザーデータ削除時は、事前バックアップがなければ記録を復旧できない。
 - 外部書影はオフライン時に表示できない場合がある。
@@ -101,8 +106,8 @@ npm test
 ## 7. 次の推奨作業（優先順）
 
 1. Android実機で、手入力／ISBN登録、アプリ再起動後の保持、編集、JSONバックアップを一巡確認する。
-2. openBD未収録時のGoogle Books等の書誌フォールバックを検討する。
-3. 必要性が確認できたら、カメラのISBNバーコード認識を追加する。
+2. Android実機でカメラ権限の許可／拒否、暗所、複数バーコードが写る場合を確認する。
+3. 日本語書籍の検索精度が不足する場合だけ、APIキー管理を含む別書誌サービスの追加を検討する。
 4. TalkBack、200%文字拡大、長文メモ、5000冊規模の回帰を追加する。
 5. 複数端末利用が必要になった場合だけ、アカウントと暗号化同期を設計する。
 
