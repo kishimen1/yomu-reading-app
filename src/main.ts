@@ -139,6 +139,10 @@ function hasRenderableCover(book: Pick<Book, "coverUrl">): boolean {
 
 function coverSourceMarkup(book: Book): string {
   if (book.coverSource === "openbd") return '<span>書影: <a href="https://openbd.jp/" target="_blank" rel="noopener noreferrer">openBD</a></span>';
+  if (book.coverSource === "googlebooks") {
+    const link = isValidIsbn(book.isbn) ? `https://books.google.com/books?vid=ISBN${normalizeIsbn(book.isbn)}` : "https://books.google.com/";
+    return `<span>書影: <a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">Google Books</a></span>`;
+  }
   if (book.coverSource === "openlibrary") {
     const link = isValidIsbn(book.isbn) ? `https://openlibrary.org/isbn/${normalizeIsbn(book.isbn)}` : "https://openlibrary.org/";
     return `<span>書影: <a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">Open Library</a></span>`;
@@ -606,15 +610,29 @@ async function searchCatalog(searchTerm: string) {
 
   const request = new AbortController();
   catalogRequest = request;
-  $("#catalog-source").textContent = "openBDから書誌情報を取得しています…";
-  $("#catalog-results").innerHTML = `<p class="catalog-empty">書誌情報を検索中です。</p>`;
+  $("#catalog-source").textContent = "openBDから書誌情報を取得し、実在書影を探しています…";
+  $("#catalog-results").innerHTML = `<p class="catalog-empty">書誌情報と書影を検索中です。</p>`;
 
   try {
     const result = await fetchOpenBdBook(term, request.signal);
     if (request.signal.aborted) return;
+    if (!result.coverUrl) {
+      try {
+        const coverResult = await resolveBookCover(result, { signal: request.signal, openBdCover: null });
+        if (coverResult.coverUrl) {
+          result.coverUrl = coverResult.coverUrl;
+          result.coverSource = coverResult.coverSource;
+        }
+      } catch {
+        if (request.signal.aborted) return;
+        // 書影だけ取得できない場合も、openBDの書誌情報は登録候補として表示する。
+      }
+    }
     visibleCatalogBooks = [result];
     renderCatalogResults(visibleCatalogBooks);
-    $("#catalog-source").textContent = "openBDの書誌情報です。書影や収録項目がない書籍もあります。";
+    $("#catalog-source").textContent = result.coverUrl
+      ? "openBDの書誌情報と、書影サービスから取得した実在表紙です。"
+      : "openBDの書誌情報です。一致する書影がない場合は代替表紙を表示します。";
   } catch (error) {
     if (request.signal.aborted) return;
     visibleCatalogBooks = [];

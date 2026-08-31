@@ -4,7 +4,7 @@
 
 ## 1. 現在地
 
-YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHTTPS公開済みで、Androidのホーム画面追加も実機確認済み。v1.2.0では、openBDとOpen Libraryによる実在表紙の自動補完を加え、保存済みの本も順次更新できる。
+YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHTTPS公開済みで、Androidのホーム画面追加も実機確認済み。v1.3.0では、openBD、Google Books、Open Libraryによる実在表紙の自動補完を行い、保存済みの本も順次更新できる。
 
 - 作業ディレクトリ: `C:\Users\ZA-KESSAN-11\Documents\読書管理アプリ`
 - ブランチ: `main`
@@ -24,7 +24,7 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 - openBDによるISBN-10／ISBN-13の実書誌検索と登録先選択
 - 対応ブラウザーのBarcodeDetectorによるISBN-13（EAN-13）カメラ読み取り
 - Open Libraryによる書名・著者・出版社・ISBN検索と手入力欄への候補反映
-- openBD優先、Open Library補完による実在表紙の自動取得
+- openBD優先、Google Books、Open Libraryの順で補完する実在表紙の自動取得
 - 保存済み・手入力・CSV取込を含む表紙のバックグラウンド補完と詳細画面からの再取得
 - 画像なし判定の30日保持、ISBNなしでは書名・著者の厳密一致、読込失敗時の代替表紙
 - 手入力によるISBN、ジャンル、ページ数、状態、読了日、評価、メモ、感想の登録
@@ -46,11 +46,12 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 | `src/data.ts` | 型、スキーマv2、正規化、v1移行、旧デモ除去 |
 | `src/csv.ts` | CSV解析、ビブリア変換、重複検知 |
 | `src/openbd.ts` | ISBN検証、openBD API接続 |
+| `src/google-books.ts` | Google Books Dynamic Links、ISBN完全一致の書影取得 |
 | `src/book-search.ts` | Open Library検索、書誌データ正規化 |
 | `src/book-covers.ts` | 表紙取得順、厳密一致、30日再検索判定 |
 | `src/styles.css` | モバイル／タブレット／デスクトップUI |
 | `public/manifest.json` | PWAマニフェスト |
-| `public/sw.js` | オフラインキャッシュ `yomu-shell-v8` |
+| `public/sw.js` | オフラインキャッシュ `yomu-shell-v9` |
 | `.github/workflows/deploy-pages.yml` | `main` push時のGitHub Pages公開 |
 | `tests/verify_app.py` | 本番プレビューを使うPlaywright回帰テスト |
 
@@ -92,7 +93,7 @@ npm test
 ## 5. 保存・プライバシー
 
 - 読書記録は利用者の端末内に保存し、GitHubには送らない。
-- 書誌検索と表紙補完では、ISBNまたは書名・著者をopenBDとOpen Libraryへ送る。
+- 書誌検索と表紙補完では、ISBNまたは書名・著者をopenBD、Google Books、Open Libraryへ送る。
 - カメラ映像はブラウザー内で処理し、保存・送信しない。
 - 機種変更、アプリ削除、ブラウザーデータ削除の前にJSON完全バックアップが必要。
 - 外部書影URLは永続キャッシュしない。書影がなくても記録本文は保持する。
@@ -101,7 +102,7 @@ npm test
 
 - ログイン、端末間同期、クラウドバックアップは未実装。
 - カメラ読み取りはHTTPSとBarcodeDetector対応ブラウザーが必要。非対応時はISBN入力へ戻る。
-- openBD／Open Libraryに未収録の本は直接入力が必要。
+- openBD／Google Books／Open Libraryに未収録の本は直接入力が必要。
 - Open Libraryの候補は作品単位の情報を含むため、版・ページ数・出版社を登録前に確認する。
 - localStorageを端末DBとして使うため、大量データ向けSQLiteや全文検索は未実装。
 - ブラウザーデータ削除時は、事前バックアップがなければ記録を復旧できない。
@@ -111,7 +112,7 @@ npm test
 
 1. Android実機で、手入力／ISBN登録、アプリ再起動後の保持、編集、JSONバックアップを一巡確認する。
 2. Android実機でカメラ権限の許可／拒否、暗所、複数バーコードが写る場合を確認する。
-3. 日本語書籍の検索精度が不足する場合だけ、APIキー管理を含む別書誌サービスの追加を検討する。
+3. Google Booksを含む日本語書籍の検索精度が不足する場合だけ、APIキー管理を含む別書誌サービスの追加を検討する。
 4. TalkBack、200%文字拡大、長文メモ、5000冊規模の回帰を追加する。
 5. 複数端末利用が必要になった場合だけ、アカウントと暗号化同期を設計する。
 

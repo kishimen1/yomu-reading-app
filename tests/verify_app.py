@@ -78,6 +78,7 @@ def run() -> None:
         page.on("pageerror", lambda error: errors.append(str(error)))
 
         openbd_records = {}
+        google_books_covers = {}
         open_library_docs = {
             "境界を歩く 佐伯 凛": [{
                 "key": "/works/OL-YOMU-1W",
@@ -100,7 +101,23 @@ def run() -> None:
             documents = open_library_docs.get(query, [])
             route.fulfill(status=200, content_type="application/json", body=json.dumps({"numFound": len(documents), "docs": documents}, ensure_ascii=False))
 
+        def handle_google_books(route):
+            parameters = parse_qs(urlparse(route.request.url).query)
+            bib_key = parameters.get("bibkeys", [""])[0]
+            callback = parameters.get("callback", [""])[0]
+            cover_url = google_books_covers.get(bib_key.removeprefix("ISBN:"), "")
+            payload = {
+                bib_key: {
+                    "bib_key": bib_key,
+                    "thumbnail_url": cover_url,
+                    "info_url": "https://books.google.com/books?vid=" + bib_key,
+                },
+            } if bib_key and cover_url else {}
+            route.fulfill(status=200, content_type="application/javascript", body=f"{callback}({json.dumps(payload)});")
+
         page.route("https://api.openbd.jp/v1/get?*", handle_openbd)
+        page.route("https://books.google.com/books?*", handle_google_books)
+        page.route("https://books.google.com/books/content?*", lambda route: route.fulfill(path=str(ROOT / "public" / "assets" / "app-icon-192.png"), content_type="image/png"))
         page.route("https://openlibrary.org/search.json?*", handle_open_library)
         page.route("https://covers.openlibrary.org/b/id/*", lambda route: route.fulfill(path=str(ROOT / "public" / "assets" / "app-icon-192.png"), content_type="image/png"))
 
@@ -184,13 +201,7 @@ def run() -> None:
                 "CollateralDetail": {"TextContent": {"Text": {"content": "検証用の内容紹介"}}},
             },
         }
-        open_library_docs[openbd_isbn] = [{
-            "key": "/books/OL-YOMU-ISBN",
-            "title": "型で育てる読書記録",
-            "author_name": ["OpenBD 著者"],
-            "isbn": [openbd_isbn],
-            "cover_i": 202,
-        }]
+        google_books_covers[openbd_isbn] = "https://books.google.com/books/content?id=GB-YOMU-ISBN&printsec=frontcover&img=1&zoom=5"
         page.locator("#bottom-add").click()
         page.locator("#catalog-status").select_option("wishlist")
         page.evaluate(
@@ -224,10 +235,11 @@ def run() -> None:
         result_button = page.get_by_role("button", name="型で育てる読書記録を追加")
         result_button.wait_for()
         assert page.locator("#catalog-search").input_value() == openbd_isbn
+        assert page.locator("#catalog-results .result-cover.has-real-cover").count() == 1
         result_button.click()
         page.locator('[data-filter="wishlist"]').click()
         assert page.locator("#book-grid .book-card").count() == 1
-        page.wait_for_function("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books.some(book => book.isbn === '9784873113364' && book.coverSource === 'openlibrary')")
+        page.wait_for_function("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books.some(book => book.isbn === '9784873113364' && book.coverSource === 'googlebooks')")
         assert page.locator("#book-grid .book-cover.has-real-cover").count() == 1
 
         # Repeating the same ISBN must not create another record.
@@ -294,6 +306,7 @@ def run() -> None:
         assert backup_data["schemaVersion"] == 2
         assert len(backup_data["books"]) == 3
         assert any(book.get("coverSource") == "openlibrary" and book.get("coverUrl") for book in backup_data["books"])
+        assert any(book.get("coverSource") == "googlebooks" and book.get("coverUrl") for book in backup_data["books"])
 
         page.wait_for_function("!document.querySelector('#toast').classList.contains('is-visible')")
         page.wait_for_timeout(250)
@@ -345,21 +358,38 @@ def run() -> None:
                 const common = {genre:'その他', pages:100, status:'read', rating:0, finishedAt:'2026-08-01', createdAt:'2026-08-01', notes:'', review:'', cover:0};
                 localStorage.setItem('yomu-reading-archive:v2', JSON.stringify({schemaVersion:2, books:[
                     {...common, id:'openbd-cover', title:'openBD表紙本', author:'表紙 著者', isbn:'9784873113364'},
-                    {...common, id:'openlibrary-cover', title:'Open Library表紙本', author:'書影 著者', isbn:'9784101010014', cover:1},
+                    {...common, id:'google-cover', title:'Google Books表紙本', author:'書影 著者', isbn:'9784101010014', cover:1, coverLookupKey:'isbn:9784101010014', coverCheckedAt:'2026-08-30T00:00:00.000Z'},
+                    {...common, id:'openlibrary-cover', title:'Open Library表紙本', author:'補完 著者', isbn:'9784873115658', cover:2},
                     {...common, id:'metadata-cover', title:'一致タイトル', author:'一致 著者', isbn:'', cover:2},
                     {...common, id:'wrong-cover', title:'違う候補', author:'正しい 著者', isbn:'', cover:3},
+                    {...common, id:'google-mismatch', title:'不一致後補完', author:'厳密 著者', isbn:'9784495210465', cover:3},
+                    {...common, id:'google-timeout', title:'タイムアウト後補完', author:'再試行 著者', isbn:'9784065243305', cover:4},
                     {...common, id:'broken-cover', title:'壊れた表紙', author:'画像 著者', isbn:'', cover:4, coverUrl:'https://cover.test/broken.png', coverSource:'openbd'},
                     {...common, id:'network-error', title:'通信失敗', author:'再試行 著者', isbn:'', cover:5}
                 ]}));
             })()"""
         )
         cover_open_library_docs = {
-            "9784101010014": [{
+            "9784873115658": [{
                 "key": "/books/OL-FALLBACK",
                 "title": "Open Library表紙本",
-                "author_name": ["書影 著者"],
-                "isbn": ["9784101010014"],
+                "author_name": ["補完 著者"],
+                "isbn": ["9784873115658"],
                 "cover_i": 202,
+            }],
+            "9784495210465": [{
+                "key": "/books/OL-MISMATCH-FALLBACK",
+                "title": "不一致後補完",
+                "author_name": ["厳密 著者"],
+                "isbn": ["9784495210465"],
+                "cover_i": 505,
+            }],
+            "9784065243305": [{
+                "key": "/books/OL-TIMEOUT-FALLBACK",
+                "title": "タイムアウト後補完",
+                "author_name": ["再試行 著者"],
+                "isbn": ["9784065243305"],
+                "cover_i": 606,
             }],
             "一致タイトル 一致 著者": [{
                 "key": "/books/OL-METADATA",
@@ -376,6 +406,9 @@ def run() -> None:
                 "cover_i": 404,
             }],
         }
+        cover_google_books_covers = {
+            "9784101010014": "https://books.google.com/books/content?id=GB-COVER&printsec=frontcover&img=1&zoom=5",
+        }
         cover_api_requests = []
 
         def handle_cover_openbd(route):
@@ -383,11 +416,28 @@ def run() -> None:
             cover_api_requests.append(("openbd", isbn))
             if isbn == "9784873113364":
                 record = {"summary": {"title": "openBD表紙本", "author": "表紙 著者", "isbn": isbn, "cover": "https://cover.test/openbd.png"}}
-            elif isbn == "9784101010014":
-                record = {"summary": {"title": "Open Library表紙本", "author": "書影 著者", "isbn": isbn, "cover": ""}}
             else:
                 record = None
             route.fulfill(status=200, content_type="application/json", body=json.dumps([record] if record else [None], ensure_ascii=False))
+
+        def handle_cover_google_books(route):
+            parameters = parse_qs(urlparse(route.request.url).query)
+            bib_key = parameters.get("bibkeys", [""])[0]
+            callback = parameters.get("callback", [""])[0]
+            isbn = bib_key.removeprefix("ISBN:")
+            cover_api_requests.append(("googlebooks", isbn))
+            if isbn == "9784065243305":
+                route.fulfill(status=200, content_type="application/javascript", body="")
+                return
+            if isbn == "9784495210465":
+                payload = {bib_key: {
+                    "bib_key": "ISBN:9780000000000",
+                    "thumbnail_url": "https://books.google.com/books/content?id=WRONG&img=1",
+                }}
+            else:
+                cover_url = cover_google_books_covers.get(isbn, "")
+                payload = {bib_key: {"bib_key": bib_key, "thumbnail_url": cover_url}} if cover_url else {}
+            route.fulfill(status=200, content_type="application/javascript", body=f"{callback}({json.dumps(payload)});")
 
         def handle_cover_open_library(route):
             query = parse_qs(urlparse(route.request.url).query).get("q", [""])[0]
@@ -405,28 +455,53 @@ def run() -> None:
                 route.fulfill(path=str(ROOT / "public" / "assets" / "app-icon-192.png"), content_type="image/png")
 
         cover_page.route("https://api.openbd.jp/v1/get?*", handle_cover_openbd)
+        cover_page.route("https://books.google.com/books?*", handle_cover_google_books)
+        cover_page.route("https://books.google.com/books/content?*", handle_cover_image)
         cover_page.route("https://openlibrary.org/search.json?*", handle_cover_open_library)
         cover_page.route("https://covers.openlibrary.org/b/id/*", handle_cover_image)
         cover_page.route("https://cover.test/*", handle_cover_image)
         open_with_retry(cover_page)
-        cover_page.wait_for_function(
-            """() => {
-                const books = JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books;
-                const byId = Object.fromEntries(books.map(book => [book.id, book]));
-                return byId['openbd-cover'].coverSource === 'openbd'
-                    && byId['openlibrary-cover'].coverSource === 'openlibrary'
-                    && byId['metadata-cover'].coverSource === 'openlibrary'
-                    && byId['wrong-cover'].coverCheckedAt && !byId['wrong-cover'].coverUrl
-                    && byId['broken-cover'].coverUrl === 'https://cover.test/broken.png';
-            }"""
-        )
+        try:
+            cover_page.wait_for_function(
+                """() => {
+                    const books = JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books;
+                    const byId = Object.fromEntries(books.map(book => [book.id, book]));
+                    return byId['openbd-cover'].coverSource === 'openbd'
+                        && byId['google-cover'].coverSource === 'googlebooks'
+                        && byId['google-cover'].coverLookupKey === 'v2:isbn:9784101010014'
+                        && byId['openlibrary-cover'].coverSource === 'openlibrary'
+                        && byId['metadata-cover'].coverSource === 'openlibrary'
+                        && byId['google-mismatch'].coverSource === 'openlibrary'
+                        && byId['google-timeout'].coverSource === 'openlibrary'
+                        && byId['wrong-cover'].coverCheckedAt && !byId['wrong-cover'].coverUrl
+                        && byId['broken-cover'].coverUrl === 'https://cover.test/broken.png';
+                }"""
+            )
+        except Exception:
+            print(json.dumps({
+                "cover_books": cover_page.evaluate("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books"),
+                "cover_requests": cover_api_requests,
+            }, ensure_ascii=False, indent=2))
+            raise
         cover_page.wait_for_function("!document.querySelector('[data-book-id=\"broken-cover\"]').classList.contains('has-real-cover')")
-        assert cover_page.locator("#book-grid .book-cover.has-real-cover").count() == 3
+        assert cover_page.locator("#book-grid .book-cover.has-real-cover").count() == 6
         assert not cover_page.locator('[data-book-id="openbd-cover"] .cover-copy').is_visible()
         assert cover_page.locator('[data-book-id="wrong-cover"] .real-cover-image').count() == 0
         cover_page.wait_for_timeout(1200)
+        assert ("googlebooks", "9784101010014") in cover_api_requests
+        assert ("openlibrary", "9784101010014") not in cover_api_requests
+        assert ("googlebooks", "9784873115658") in cover_api_requests
+        assert ("openlibrary", "9784873115658") in cover_api_requests
+        assert ("googlebooks", "9784495210465") in cover_api_requests
+        assert ("openlibrary", "9784495210465") in cover_api_requests
+        assert ("googlebooks", "9784065243305") in cover_api_requests
+        assert ("openlibrary", "9784065243305") in cover_api_requests
         assert ("openlibrary", "通信失敗 再試行 著者") in cover_api_requests
         assert not cover_page.evaluate("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books.find(book => book.id === 'network-error').coverCheckedAt")
+
+        cover_page.get_by_role("button", name="Google Books表紙本の詳細を開く").click()
+        assert "Google Books" in cover_page.locator("#detail-cover-source").inner_text()
+        cover_page.locator('#detail-dialog [data-close="detail-dialog"]').click()
 
         cover_page.get_by_role("button", name="違う候補の詳細を開く").click()
         cover_open_library_docs["違う候補 正しい 著者"] = [{
@@ -444,7 +519,7 @@ def run() -> None:
         cover_page.locator('#detail-dialog [data-close="detail-dialog"]').click()
         cover_page.wait_for_timeout(500)
         image_state_before_reload = cover_page.evaluate("[...document.querySelectorAll('[data-cover-image]')].map(image => ({src:image.getAttribute('src'), complete:image.complete, width:image.naturalWidth, hidden:image.hidden, connected:image.isConnected}))")
-        assert cover_page.evaluate("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books.filter(book => book.coverUrl).length") == 5, image_state_before_reload
+        assert cover_page.evaluate("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books.filter(book => book.coverUrl).length") == 8, image_state_before_reload
 
         request_count_before_reload = len(cover_api_requests)
         covers_before_reload = cover_page.evaluate("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books.map(({id, coverUrl, coverSource, coverCheckedAt}) => ({id, coverUrl, coverSource, coverCheckedAt}))")
@@ -452,7 +527,7 @@ def run() -> None:
         cover_page.wait_for_timeout(1600)
         covers_after_reload = cover_page.evaluate("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books.map(({id, coverUrl, coverSource, coverCheckedAt}) => ({id, coverUrl, coverSource, coverCheckedAt}))")
         assert cover_api_requests[request_count_before_reload:] == [("openlibrary", "通信失敗 再試行 著者")], {"requests": cover_api_requests, "before": covers_before_reload, "after": covers_after_reload}
-        assert cover_page.locator("#book-grid .book-cover.has-real-cover").count() == 4
+        assert cover_page.locator("#book-grid .book-cover.has-real-cover").count() == 7
         cover_context.close()
 
         # v1 data is migrated without deleting the legacy source.

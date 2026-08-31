@@ -31,7 +31,7 @@ const LEGACY_DEMO_BOOKS = new Map([
 
 export type BookStatus = typeof BOOK_STATUSES[number];
 export type ThemePreference = typeof THEME_PREFERENCES[number];
-export type CoverSource = "openbd" | "openlibrary";
+export type CoverSource = "openbd" | "googlebooks" | "openlibrary";
 
 export interface Book {
   id: string;
@@ -133,7 +133,7 @@ export function normalizeBook(value: unknown, index = 0, today = todayIso()): Bo
 
   const coverUrlCandidate = text(value.coverUrl, "", 2_000).trim();
   const coverUrl = /^https:\/\//i.test(coverUrlCandidate) ? coverUrlCandidate : "";
-  const coverSource = coverUrl && (value.coverSource === "openbd" || value.coverSource === "openlibrary") ? value.coverSource : undefined;
+  const coverSource = coverUrl && (value.coverSource === "openbd" || value.coverSource === "googlebooks" || value.coverSource === "openlibrary") ? value.coverSource : undefined;
   const source = value.source === "openbd" || value.source === "catalog" || value.source === "import" ? value.source : "manual";
 
   return {

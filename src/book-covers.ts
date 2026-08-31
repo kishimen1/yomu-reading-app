@@ -1,8 +1,15 @@
 import type { Book, CoverSource } from "./data";
 import { findOpenLibraryCoverForBook } from "./book-search";
+import { findGoogleBooksCoverByIsbn } from "./google-books";
 import { fetchOpenBdBook, isValidIsbn, normalizeIsbn } from "./openbd";
 
 export const COVER_LOOKUP_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+const COVER_LOOKUP_VERSION = 2;
+
+export interface CoverLookupOptions {
+  signal?: AbortSignal;
+  openBdCover?: string | null;
+}
 
 export interface CoverLookupResult {
   lookupKey: string;
@@ -17,8 +24,8 @@ function normalizedText(value: string): string {
 
 export function coverLookupKey(book: Pick<Book, "title" | "author" | "isbn">): string {
   const isbn = normalizeIsbn(book.isbn);
-  if (isValidIsbn(isbn)) return `isbn:${isbn}`;
-  return `meta:${normalizedText(book.title)}\u0000${normalizedText(book.author)}`;
+  if (isValidIsbn(isbn)) return `v${COVER_LOOKUP_VERSION}:isbn:${isbn}`;
+  return `v${COVER_LOOKUP_VERSION}:meta:${normalizedText(book.title)}\u0000${normalizedText(book.author)}`;
 }
 
 export function shouldLookupBookCover(book: Book, now = Date.now()): boolean {
@@ -54,20 +61,35 @@ function canDisplayCover(url: string, signal?: AbortSignal): Promise<boolean> {
   });
 }
 
-export async function resolveBookCover(book: Book, signal?: AbortSignal): Promise<CoverLookupResult> {
+export async function resolveBookCover(book: Pick<Book, "title" | "author" | "isbn">, options: CoverLookupOptions = {}): Promise<CoverLookupResult> {
+  const { signal, openBdCover } = options;
   const lookupKey = coverLookupKey(book);
   const checkedAt = new Date().toISOString();
   const isbn = normalizeIsbn(book.isbn);
 
   if (isValidIsbn(isbn)) {
+    if (openBdCover !== null) {
+      try {
+        const resolvedOpenBdCover = openBdCover === undefined
+          ? (await fetchOpenBdBook(isbn, signal)).coverUrl || ""
+          : openBdCover;
+        if (resolvedOpenBdCover && await canDisplayCover(resolvedOpenBdCover, signal)) {
+          return { lookupKey, checkedAt, coverUrl: resolvedOpenBdCover, coverSource: "openbd" };
+        }
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        // openBDに未収録、または一時的に利用できない場合も次の書影サービスを試す。
+      }
+    }
+
     try {
-      const openBdBook = await fetchOpenBdBook(isbn, signal);
-      if (openBdBook.coverUrl && await canDisplayCover(openBdBook.coverUrl, signal)) {
-        return { lookupKey, checkedAt, coverUrl: openBdBook.coverUrl, coverSource: "openbd" };
+      const googleBooksCover = await findGoogleBooksCoverByIsbn(isbn, signal);
+      if (googleBooksCover && await canDisplayCover(googleBooksCover, signal)) {
+        return { lookupKey, checkedAt, coverUrl: googleBooksCover, coverSource: "googlebooks" };
       }
     } catch (error) {
       if (signal?.aborted) throw error;
-      // openBDに未収録、または一時的に利用できない場合もOpen Libraryを試す。
+      // Google Booksが利用できない場合もOpen Libraryを試す。
     }
   }
 
