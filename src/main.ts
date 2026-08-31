@@ -18,6 +18,7 @@ import {
 import { hasDuplicateBook, mergeImportedBooks, parseBooksCsv } from "./csv";
 import { fetchOpenBdBook, isValidIsbn, normalizeIsbn } from "./openbd";
 import { searchOpenLibraryBooks } from "./book-search";
+import { coverLookupKey, resolveBookCover, shouldLookupBookCover } from "./book-covers";
 
 type ShelfView = "grid" | "list";
 type ScreenName = "shelf" | "analytics" | "settings";
@@ -51,6 +52,8 @@ declare global {
 
 const COVER_POSITIONS = ["0% 0%", "50% 0%", "100% 0%", "0% 100%", "50% 100%", "100% 100%"]; 
 const GENRE_COLORS = ["#256b54", "#e4513b", "#456a82", "#c3912f", "#7b657f", "#88908b"];
+const COVER_LOOKUP_SESSION_LIMIT = 50;
+const COVER_LOOKUP_DELAY_MS = 650;
 let visibleCatalogBooks: CatalogBook[] = [];
 let visibleManualSearchBooks: CatalogBook[] = [];
 let selectedManualCatalogBook: CatalogBook | null = null;
@@ -68,6 +71,11 @@ let scannerTimer: ReturnType<typeof setInterval> | null = null;
 let scannerDetectionBusy = false;
 let deferredInstallPrompt: BeforeInstallPromptEvent | null = null;
 let installCompletedThisSession = false;
+let coverLookupTimer: ReturnType<typeof setTimeout> | null = null;
+let coverLookupRunning = false;
+let coverLookupSessionAttempts = 0;
+const coverLookupAttempted = new Set<string>();
+const priorityCoverLookups = new Set<string>();
 
 function $<T extends Element = HTMLElement>(selector: string, root: ParentNode = document): T {
   const element = root.querySelector<T>(selector);
@@ -109,6 +117,145 @@ function showToast(message: string) {
   toast.classList.add("is-visible");
   if (toastTimer !== null) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2600);
+}
+
+function coverImageMarkup(book: Pick<Book, "id" | "title" | "coverUrl">, lazy = false): string {
+  if (!book.coverUrl) return "";
+  return `<img class="real-cover-image" src="${escapeHtml(book.coverUrl)}" alt="${escapeHtml(`『${book.title}』の表紙`)}" ${lazy ? 'loading="lazy"' : ""} decoding="async" referrerpolicy="no-referrer" data-cover-image data-cover-book-id="${escapeHtml(book.id)}">`;
+}
+
+function catalogCoverImageMarkup(book: CatalogBook): string {
+  if (!book.coverUrl) return "";
+  return `<img class="real-cover-image" src="${escapeHtml(book.coverUrl)}" alt="${escapeHtml(`『${book.title}』の表紙`)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" data-cover-image>`;
+}
+
+function coverAttemptKey(book: Book): string {
+  return `${book.id}\u0000${coverLookupKey(book)}`;
+}
+
+function hasRenderableCover(book: Pick<Book, "coverUrl">): boolean {
+  return Boolean(book.coverUrl);
+}
+
+function coverSourceMarkup(book: Book): string {
+  if (book.coverSource === "openbd") return '<span>書影: <a href="https://openbd.jp/" target="_blank" rel="noopener noreferrer">openBD</a></span>';
+  if (book.coverSource === "openlibrary") {
+    const link = isValidIsbn(book.isbn) ? `https://openlibrary.org/isbn/${normalizeIsbn(book.isbn)}` : "https://openlibrary.org/";
+    return `<span>書影: <a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">Open Library</a></span>`;
+  }
+  return "<span>表紙画像なし</span>";
+}
+
+function updateDetailCover(book: Book) {
+  const form = document.querySelector<HTMLFormElement>(`#detail-form[data-book-id="${CSS.escape(book.id)}"]`);
+  if (!form) return;
+  const visual = form.querySelector<HTMLElement>("#detail-cover-visual");
+  const source = form.querySelector<HTMLElement>("#detail-cover-source");
+  if (visual) {
+    visual.classList.toggle("has-real-cover", hasRenderableCover(book));
+    visual.innerHTML = coverImageMarkup(book);
+  }
+  if (source) source.innerHTML = coverSourceMarkup(book);
+}
+
+function applyCoverResult(book: Book, result: Awaited<ReturnType<typeof resolveBookCover>>): boolean {
+  book.coverLookupKey = result.lookupKey;
+  book.coverCheckedAt = result.checkedAt;
+  if (!result.coverUrl) return false;
+  book.coverUrl = result.coverUrl;
+  book.coverSource = result.coverSource;
+  return true;
+}
+
+async function lookupBookCover(bookId: string, force = false): Promise<"found" | "missing" | "error"> {
+  const book = books.find(item => item.id === bookId);
+  if (!book || (!force && !shouldLookupBookCover(book)) || !navigator.onLine) return "missing";
+  const lookupKey = coverLookupKey(book);
+  const attemptKey = coverAttemptKey(book);
+  coverLookupAttempted.add(attemptKey);
+
+  try {
+    const result = await resolveBookCover(book);
+    const current = books.find(item => item.id === bookId);
+    if (!current || coverLookupKey(current) !== lookupKey) return "missing";
+    const found = applyCoverResult(current, result);
+    persist();
+    if (found) {
+      renderBooks();
+      updateDetailCover(current);
+      return "found";
+    }
+    return "missing";
+  } catch {
+    return "error";
+  }
+}
+
+function scheduleCoverBackfill(delay = 0) {
+  if (coverLookupTimer !== null) return;
+  coverLookupTimer = setTimeout(() => {
+    coverLookupTimer = null;
+    void runCoverBackfill();
+  }, delay);
+}
+
+function queuePriorityCoverLookup(bookId: string) {
+  const book = books.find(item => item.id === bookId);
+  if (!book || book.coverUrl) return;
+  priorityCoverLookups.add(bookId);
+  coverLookupAttempted.delete(coverAttemptKey(book));
+  scheduleCoverBackfill();
+}
+
+async function runCoverBackfill() {
+  if (coverLookupRunning || !navigator.onLine) return;
+  coverLookupRunning = true;
+  try {
+    while (navigator.onLine) {
+      const priorityId = priorityCoverLookups.values().next().value as string | undefined;
+      const candidate = priorityId
+        ? books.find(book => book.id === priorityId)
+        : books.find(book => shouldLookupBookCover(book) && !coverLookupAttempted.has(coverAttemptKey(book)));
+      if (priorityId && !candidate) {
+        priorityCoverLookups.delete(priorityId);
+        continue;
+      }
+      if (!candidate) break;
+      if (!priorityId && coverLookupSessionAttempts >= COVER_LOOKUP_SESSION_LIMIT) break;
+      priorityCoverLookups.delete(candidate.id);
+      coverLookupSessionAttempts += 1;
+      await lookupBookCover(candidate.id);
+      await new Promise(resolve => window.setTimeout(resolve, COVER_LOOKUP_DELAY_MS));
+    }
+  } finally {
+    coverLookupRunning = false;
+    if (priorityCoverLookups.size > 0 && navigator.onLine) scheduleCoverBackfill();
+  }
+}
+
+async function refreshBookCover(bookId: string, button: HTMLButtonElement) {
+  if (!navigator.onLine) {
+    showToast("通信できるときに表紙を再取得できます");
+    return;
+  }
+  const book = books.find(item => item.id === bookId);
+  if (!book) return;
+  button.disabled = true;
+  button.classList.add("is-loading");
+  const result = await lookupBookCover(bookId, true);
+  button.disabled = false;
+  button.classList.remove("is-loading");
+  iconize();
+  showToast(result === "found" ? "表紙画像を更新しました" : result === "missing" ? "一致する表紙画像が見つかりませんでした" : "表紙画像を取得できませんでした");
+}
+
+function handleCoverImageError(image: HTMLImageElement) {
+  image.hidden = true;
+  image.closest(".has-real-cover")?.classList.remove("has-real-cover");
+  const bookId = image.dataset.coverBookId;
+  const form = bookId ? document.querySelector<HTMLFormElement>(`#detail-form[data-book-id="${CSS.escape(bookId)}"]`) : null;
+  const source = form?.querySelector<HTMLElement>("#detail-cover-source");
+  if (source) source.textContent = "表紙画像を読み込めませんでした";
 }
 
 function isInstalled(): boolean {
@@ -185,8 +332,8 @@ function renderBooks() {
   grid.classList.toggle("is-list", activeView === "list");
   grid.innerHTML = filtered.map((book, index) => `
     <article class="book-card" style="animation-delay:${Math.min(index * 35, 210)}ms">
-      <button class="book-cover" type="button" data-book-id="${escapeHtml(book.id)}" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}" aria-label="${escapeHtml(book.title)}の詳細を開く">
-        ${book.coverUrl ? `<img src="${escapeHtml(book.coverUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}
+      <button class="book-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" type="button" data-book-id="${escapeHtml(book.id)}" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}" aria-label="${escapeHtml(book.title)}の詳細を開く">
+        ${coverImageMarkup(book, true)}
         <span class="cover-copy"><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)}</small></span>
       </button>
       <div class="book-meta">
@@ -436,7 +583,7 @@ function setAddMode(mode: AddMode) {
 function renderCatalogResults(results: CatalogBook[], emptyMessage = "書誌情報が見つかりませんでした。手入力で登録できます。") {
   $("#catalog-results").innerHTML = results.map(book => `
     <article class="catalog-result">
-      <div class="result-cover" style="--cover-position:${COVER_POSITIONS[book.cover]}">${book.coverUrl ? `<img src="${escapeHtml(book.coverUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}</div>
+      <div class="result-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" style="--cover-position:${COVER_POSITIONS[book.cover]}">${catalogCoverImageMarkup(book)}</div>
       <span><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)}${book.publisher ? ` · ${escapeHtml(book.publisher)}` : ""}<br>ISBN ${escapeHtml(book.isbn)}</small></span>
       <button type="button" data-catalog-isbn="${book.isbn}" aria-label="${escapeHtml(book.title)}を追加"><i data-lucide="plus"></i></button>
     </article>`).join("") || `<p class="catalog-empty">${escapeHtml(emptyMessage)}</p>`;
@@ -488,7 +635,7 @@ function renderManualSearchResults(results: CatalogBook[], emptyMessage = "タ�
     const metadata = [book.publisher, book.pages ? `${book.pages.toLocaleString("ja-JP")}ページ` : "", book.isbn ? `ISBN ${book.isbn}` : "ISBNなし"].filter(Boolean).join(" · ");
     return `
       <article class="manual-search-result ${index === selectedIndex ? "is-selected" : ""}">
-        <div class="result-cover" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">${book.coverUrl ? `<img src="${escapeHtml(book.coverUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}</div>
+        <div class="result-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">${catalogCoverImageMarkup(book)}</div>
         <span><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)}<br>${escapeHtml(metadata)}</small></span>
         <button type="button" data-manual-result-index="${index}" aria-label="${escapeHtml(book.title)}を入力欄に反映">${index === selectedIndex ? '<i data-lucide="check"></i><span>選択済み</span>' : '<i data-lucide="arrow-down-to-line"></i><span>選択</span>'}</button>
       </article>`;
@@ -628,6 +775,10 @@ function addCatalogBook(catalogBook: CatalogBook, source = "検索") {
   const selectedStatus = $<HTMLSelectElement>("#catalog-status").value;
   const status: BookStatus = isBookStatus(selectedStatus) ? selectedStatus : "read";
   const candidate: Book = { ...catalogBook, id: crypto.randomUUID(), status, rating: 0, finishedAt: status === "read" ? now : "", createdAt: now, notes: settings.synopsis ? catalogBook.synopsis || "" : "", review: "" };
+  if (candidate.coverUrl) {
+    candidate.coverLookupKey = coverLookupKey(candidate);
+    candidate.coverCheckedAt = new Date().toISOString();
+  }
   if (hasDuplicateBook(books, candidate)) {
     showToast(`「${catalogBook.title}」はすでに本棚にあります`);
     return;
@@ -637,6 +788,7 @@ function addCatalogBook(catalogBook: CatalogBook, source = "検索") {
   renderAll();
   closeDialog("add-dialog");
   showToast(`${source}から「${catalogBook.title}」を${statusLabel(status)}の本に追加しました`);
+  queuePriorityCoverLookup(candidate.id);
 }
 
 function openBookDetail(id: string) {
@@ -644,7 +796,11 @@ function openBookDetail(id: string) {
   if (!book) return;
   $("#detail-content").innerHTML = `
     <form class="detail-layout" id="detail-form" data-book-id="${escapeHtml(book.id)}" data-rating="${book.rating}">
-      <div class="detail-cover-panel"><div class="detail-cover" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">${book.coverUrl ? `<img src="${escapeHtml(book.coverUrl)}" alt="" referrerpolicy="no-referrer">` : ""}</div></div>
+      <div class="detail-cover-panel">
+        <div class="detail-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" id="detail-cover-visual" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">${coverImageMarkup(book)}</div>
+        <div class="detail-cover-meta" id="detail-cover-source">${coverSourceMarkup(book)}</div>
+        <button class="cover-refresh-button" type="button" data-detail-action="refresh-cover"><i data-lucide="refresh-cw"></i><span>表紙を再取得</span></button>
+      </div>
       <div class="detail-form">
         <span class="section-kicker">BOOK RECORD</span>
         <h2>${escapeHtml(book.title)}</h2>
@@ -678,6 +834,7 @@ function openBookDetail(id: string) {
 function saveBookDetail(form: HTMLFormElement) {
   const book = books.find(item => item.id === form.dataset.bookId);
   if (!book) return;
+  const previousLookupKey = coverLookupKey(book);
   const formData = new FormData(form);
   const isbnInput = $<HTMLInputElement>('[name="isbn"]', form);
   const rawIsbn = String(formData.get("isbn") || "").trim();
@@ -704,11 +861,19 @@ function saveBookDetail(form: HTMLFormElement) {
     showToast("同じISBN、または同じ書名と著者の本がすでにあります");
     return;
   }
+  const coverIdentityChanged = coverLookupKey(candidate) !== previousLookupKey;
+  if (coverIdentityChanged) {
+    candidate.coverUrl = "";
+    candidate.coverSource = undefined;
+    candidate.coverLookupKey = undefined;
+    candidate.coverCheckedAt = undefined;
+  }
   Object.assign(book, candidate, { id: book.id, createdAt: book.createdAt });
   persist();
   renderAll();
   closeDialog("detail-dialog");
   showToast("読書記録を更新しました");
+  if (coverIdentityChanged) queuePriorityCoverLookup(book.id);
 }
 
 function shareBook(id: string) {
@@ -773,6 +938,9 @@ async function importJson(file: File) {
     applyTheme(settings.theme);
     renderAll();
     showToast(`${books.length}件の読書記録を復元しました`);
+    coverLookupAttempted.clear();
+    coverLookupSessionAttempts = 0;
+    scheduleCoverBackfill(300);
   } catch {
     showToast("バックアップ形式を確認できませんでした");
   }
@@ -792,6 +960,9 @@ async function importCsv(file: File) {
     summary.innerHTML = `<strong>${formatLabel}を取り込みました。</strong> 追加 ${merged.added}件・重複スキップ ${merged.duplicates}件・無効行 ${parsed.invalidRows}件`;
     summary.hidden = false;
     showToast(`${merged.added}件を追加し、重複${merged.duplicates}件をスキップしました`);
+    coverLookupAttempted.clear();
+    coverLookupSessionAttempts = 0;
+    scheduleCoverBackfill(300);
   } catch (error) {
     const message = error instanceof Error ? error.message : "CSV形式を確認できませんでした";
     summary.innerHTML = `<strong>取り込みできませんでした。</strong> ${escapeHtml(message)}`;
@@ -818,6 +989,10 @@ function updateGoalUI() {
 }
 
 function initializeEvents() {
+  document.addEventListener("error", event => {
+    if (event.target instanceof HTMLImageElement && event.target.matches("[data-cover-image]")) handleCoverImageError(event.target);
+  }, true);
+
   document.addEventListener("click", event => {
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -871,6 +1046,10 @@ function initializeEvents() {
       const form = detailAction.closest<HTMLFormElement>("#detail-form");
       const bookId = form?.dataset.bookId;
       if (!form || !bookId) return;
+      if (detailAction.dataset.detailAction === "refresh-cover") {
+        void refreshBookCover(bookId, detailAction);
+        return;
+      }
       if (detailAction.dataset.detailAction === "save") saveBookDetail(form);
       if (detailAction.dataset.detailAction === "share") shareBook(bookId);
       if (detailAction.dataset.detailAction === "delete") deleteBook(bookId);
@@ -946,12 +1125,17 @@ function initializeEvents() {
       review: data.get("review"),
       cover: selectedMatches && selected ? selected.cover : books.length % 6,
       coverUrl: selectedMatches ? selected?.coverUrl || "" : "",
+      coverSource: selectedMatches ? selected?.coverSource : undefined,
       source: selectedMatches ? "catalog" : "manual",
     });
     if (!candidate) return;
     if (hasDuplicateBook(books, candidate)) {
       showToast(`「${candidate.title}」はすでに本棚にあります`);
       return;
+    }
+    if (candidate.coverUrl) {
+      candidate.coverLookupKey = coverLookupKey(candidate);
+      candidate.coverCheckedAt = new Date().toISOString();
     }
     books.unshift(candidate);
     persist();
@@ -966,6 +1150,7 @@ function initializeEvents() {
     syncManualFinishedAt();
     closeDialog("add-dialog");
     showToast("新しい本を追加しました");
+    queuePriorityCoverLookup(candidate.id);
   });
 
   $("#export-csv").addEventListener("click", exportCsv);
@@ -1003,6 +1188,10 @@ function initializeEvents() {
     if (event.target === dialog) closeDialog(dialog.id);
   }));
   $<HTMLDialogElement>("#add-dialog").addEventListener("close", stopBarcodeScanner);
+  window.addEventListener("online", () => {
+    coverLookupSessionAttempts = 0;
+    scheduleCoverBackfill(300);
+  });
 }
 
 function initialize() {
@@ -1017,6 +1206,7 @@ function initialize() {
   renderManualSearchResults([]);
   renderAll();
   setTimeout(iconize, 150);
+  scheduleCoverBackfill(900);
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 

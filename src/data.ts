@@ -31,6 +31,7 @@ const LEGACY_DEMO_BOOKS = new Map([
 
 export type BookStatus = typeof BOOK_STATUSES[number];
 export type ThemePreference = typeof THEME_PREFERENCES[number];
+export type CoverSource = "openbd" | "openlibrary";
 
 export interface Book {
   id: string;
@@ -48,10 +49,13 @@ export interface Book {
   cover: number;
   publisher?: string;
   coverUrl?: string;
+  coverSource?: CoverSource;
+  coverLookupKey?: string;
+  coverCheckedAt?: string;
   source?: "manual" | "catalog" | "openbd" | "import";
 }
 
-export type CatalogBook = Pick<Book, "title" | "author" | "isbn" | "genre" | "pages" | "cover"> & Pick<Book, "publisher" | "coverUrl" | "source"> & { synopsis?: string };
+export type CatalogBook = Pick<Book, "title" | "author" | "isbn" | "genre" | "pages" | "cover"> & Pick<Book, "publisher" | "coverUrl" | "coverSource" | "source"> & { synopsis?: string };
 
 export interface Settings {
   theme: ThemePreference;
@@ -101,6 +105,13 @@ function isoDate(value: unknown, fallback = ""): string {
   return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== candidate ? fallback : candidate;
 }
 
+function isoTimestamp(value: unknown): string {
+  const candidate = text(value, "", 100).trim();
+  if (!candidate) return "";
+  const timestamp = new Date(candidate);
+  return Number.isNaN(timestamp.getTime()) ? "" : timestamp.toISOString();
+}
+
 export function isBookStatus(value: unknown): value is BookStatus {
   return BOOK_STATUSES.includes(value as BookStatus);
 }
@@ -122,6 +133,7 @@ export function normalizeBook(value: unknown, index = 0, today = todayIso()): Bo
 
   const coverUrlCandidate = text(value.coverUrl, "", 2_000).trim();
   const coverUrl = /^https:\/\//i.test(coverUrlCandidate) ? coverUrlCandidate : "";
+  const coverSource = coverUrl && (value.coverSource === "openbd" || value.coverSource === "openlibrary") ? value.coverSource : undefined;
   const source = value.source === "openbd" || value.source === "catalog" || value.source === "import" ? value.source : "manual";
 
   return {
@@ -140,6 +152,9 @@ export function normalizeBook(value: unknown, index = 0, today = todayIso()): Bo
     cover: boundedInteger(value.cover, 0, 5, index % 6),
     publisher: text(value.publisher, "", 300).trim(),
     coverUrl,
+    coverSource,
+    coverLookupKey: text(value.coverLookupKey, "", 1_000).trim() || undefined,
+    coverCheckedAt: isoTimestamp(value.coverCheckedAt) || undefined,
     source,
   };
 }

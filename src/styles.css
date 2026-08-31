@@ -100,6 +100,10 @@ h2 { letter-spacing: 0; }
 @keyframes card-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .book-cover { position: relative; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; border: 0; padding: 0; background-color: #d8d8d3; background-image: url("/assets/book-cover-sprite.png"); background-size: 300% 200%; background-position: var(--cover-position); box-shadow: 0 11px 25px rgba(25, 28, 26, .16); text-align: left; }
 .book-cover::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(12, 14, 13, .74) 0, rgba(12, 14, 13, .06) 54%); }
+.has-real-cover { background-color: #e9e6dd; background-image: none !important; }
+.book-cover.has-real-cover::after { display: none; }
+.book-cover.has-real-cover .cover-copy { display: none; }
+.real-cover-image { width: 100%; height: 100%; display: block; object-fit: contain; background: #e9e6dd; }
 .book-cover:hover { transform: translateY(-4px); box-shadow: 0 17px 34px rgba(25, 28, 26, .2); }
 .book-cover, .book-cover:hover { transition: transform .24s ease, box-shadow .24s ease; }
 .cover-copy { position: absolute; z-index: 1; right: 12px; bottom: 14px; left: 12px; color: #fff; }
@@ -207,6 +211,8 @@ h2 { letter-spacing: 0; }
 .data-note svg { flex: 0 0 auto; width: 20px; }
 .data-note p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
 .data-note strong { color: var(--green); }
+.cover-data-note { background: color-mix(in srgb, var(--cream) 72%, var(--surface)); color: var(--ink); }
+.cover-data-note a { color: var(--green); font-weight: 700; text-underline-offset: 3px; }
 .setting-row { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-top: 1px solid var(--line); }
 .setting-row:first-of-type { border-top: 0; }
 .setting-row > div:first-child { display: grid; gap: 4px; }
@@ -248,7 +254,7 @@ dialog::backdrop { background: rgba(10, 12, 11, .62); backdrop-filter: blur(3px)
 .catalog-controls { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 12px; align-items: end; }
 .catalog-result { display: grid; grid-template-columns: 56px 1fr auto; gap: 13px; align-items: center; margin-top: 12px; padding: 12px; border: 1px solid var(--line); background: var(--surface); }
 .result-cover { width: 56px; aspect-ratio: 2/3; background: url("/assets/book-cover-sprite.png"); background-size: 300% 200%; background-position: var(--cover-position); }
-.result-cover img, .book-cover > img, .detail-cover > img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.result-cover img, .book-cover > img, .detail-cover > img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .catalog-result span { display: grid; gap: 3px; }
 .catalog-result small { color: var(--muted); font-size: 10px; }
 .catalog-result button { width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: var(--ink); color: #fff; }
@@ -299,8 +305,15 @@ dialog::backdrop { background: rgba(10, 12, 11, .62); backdrop-filter: blur(3px)
 .detail-dialog { width: min(820px, calc(100% - 28px)); max-height: calc(100dvh - 28px); padding: 0; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); overflow: auto; }
 .dialog-close { position: absolute; z-index: 5; top: 16px; right: 16px; }
 .detail-layout { display: grid; grid-template-columns: minmax(240px, 330px) 1fr; min-height: 600px; }
-.detail-cover-panel { position: relative; min-height: 540px; padding: 46px; display: flex; align-items: center; justify-content: center; background: #1a1e1b; }
+.detail-cover-panel { position: relative; min-height: 540px; padding: 46px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #1a1e1b; }
 .detail-cover { width: min(220px, 86%); aspect-ratio: 2/3; background: url("/assets/book-cover-sprite.png"); background-size: 300% 200%; background-position: var(--cover-position); box-shadow: 0 22px 40px rgba(0,0,0,.4); }
+.detail-cover-meta { min-height: 1.5em; color: #aab2ac; font-size: 9px; letter-spacing: .04em; text-align: center; }
+.detail-cover-meta a { color: #dce3de; text-underline-offset: 3px; }
+.cover-refresh-button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 13px; border: 1px solid #505852; background: transparent; color: #f1f4f2; font-size: 10px; font-weight: 700; }
+.cover-refresh-button:hover { border-color: #f1f4f2; background: rgba(255,255,255,.07); }
+.cover-refresh-button svg { width: 15px; }
+.cover-refresh-button.is-loading svg { animation: cover-spin .8s linear infinite; }
+@keyframes cover-spin { to { transform: rotate(360deg); } }
 .detail-form { padding: 50px 40px 35px; }
 .detail-form .section-kicker { margin-bottom: 9px; }
 .detail-form h2 { margin: 0 0 5px; font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-size: 31px; line-height: 1.4; }

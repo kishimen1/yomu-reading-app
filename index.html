@@ -185,7 +185,8 @@
               <input id="import-csv-file" type="file" accept="text/csv,.csv" hidden>
             </div>
             <div class="import-summary" id="import-summary" role="status" aria-live="polite" hidden></div>
-            <div class="data-note"><i data-lucide="shield-check"></i><p><strong>プライバシーファースト</strong><br>読書記録は端末内に保存され、アカウント登録やクラウド同期は行いません。ISBN検索時はopenBDへ、書名・著者検索時はOpen Libraryへ検索語を送信します。カメラ映像は端末外へ送信しません。</p></div>
+            <div class="data-note"><i data-lucide="shield-check"></i><p><strong>プライバシーファースト</strong><br>読書記録は端末内に保存され、アカウント登録やクラウド同期は行いません。書誌検索と表紙補完ではISBN、または書名・著者をopenBDとOpen Libraryへ送信します。カメラ映像は端末外へ送信しません。</p></div>
+            <div class="data-note cover-data-note"><i data-lucide="image"></i><p><strong>実在する表紙を自動補完</strong><br>書影は <a href="https://openbd.jp/" target="_blank" rel="noopener noreferrer">openBD</a> と <a href="https://openlibrary.org/" target="_blank" rel="noopener noreferrer">Open Library</a> から取得します。通信できないときや一致する画像がない本は、YOMUの代替表紙を表示します。</p></div>
           </section>
           <section class="settings-section">
             <div class="settings-title"><i data-lucide="sliders-horizontal"></i><div><h2>表示と記録</h2><p>日々の記録方法を調整します。</p></div></div>
@@ -194,7 +195,7 @@
             <label class="setting-row"><div><strong>あらすじをメモに追加</strong><span>書誌取得時に自動入力</span></div><input class="switch" type="checkbox" id="synopsis-toggle" checked></label>
           </section>
           <section class="settings-section about-section">
-            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>PWA 1.1.0</span></div></div>
+            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>PWA 1.2.0</span></div></div>
             <p>読書の記憶を、あとから読み解ける記録へ。</p>
             <span class="release-badge">LOCAL FIRST</span>
           </section>

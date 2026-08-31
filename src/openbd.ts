@@ -102,6 +102,7 @@ export async function fetchOpenBdBook(value: string, signal?: AbortSignal): Prom
       || stringValue(recordAt(source, "hanmoto", "kaisetsu"))
       || firstTextContent(recordAt(source, "onix", "CollateralDetail", "TextContent"));
 
+    const coverUrl = safeCoverUrl(summary.cover);
     return {
       title,
       author: stringValue(summary.author) || "著者不明",
@@ -109,7 +110,8 @@ export async function fetchOpenBdBook(value: string, signal?: AbortSignal): Prom
       genre: "その他",
       pages: pageCount(source),
       publisher: stringValue(summary.publisher),
-      coverUrl: safeCoverUrl(summary.cover),
+      coverUrl,
+      coverSource: coverUrl ? "openbd" : undefined,
       source: "openbd",
       synopsis,
       cover: Math.abs([...isbn].reduce((total, char) => total + char.charCodeAt(0), 0)) % 6,
