@@ -19,10 +19,18 @@ import { hasDuplicateBook, mergeImportedBooks, parseBooksCsv } from "./csv";
 import { fetchOpenBdBook, isValidIsbn, normalizeIsbn } from "./openbd";
 import { searchOpenLibraryBooks } from "./book-search";
 import { coverLookupKey, resolveBookCover, shouldLookupBookCover } from "./book-covers";
+import { findGoogleBooksCoverByIsbn } from "./google-books";
 
 type ShelfView = "grid" | "list";
 type ScreenName = "shelf" | "analytics" | "settings";
 type AddMode = "search" | "manual";
+type ManualStage = "search" | "confirm";
+
+interface ShelfCriteria {
+  genre: string;
+  rating: string;
+  finishedPeriod: string;
+}
 
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
@@ -62,6 +70,7 @@ let settings = loadSettings();
 let activeFilter: BookStatus = "read";
 let activeView: ShelfView = "grid";
 let query = "";
+let shelfCriteria: ShelfCriteria = { genre: "", rating: "", finishedPeriod: "" };
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogRequest: AbortController | null = null;
@@ -319,12 +328,60 @@ function initializeInstallExperience() {
   updateInstallUI();
 }
 
+function matchesFinishedPeriod(book: Book, period: string): boolean {
+  if (!period) return true;
+  if (/^\d{4}$/.test(period)) return book.finishedAt.startsWith(period);
+  if (/^\d{4}-\d{2}$/.test(period)) return book.finishedAt.startsWith(period);
+  const recurringMonth = period.match(/^\*-(\d{2})$/)?.[1];
+  return recurringMonth ? book.finishedAt.slice(5, 7) === recurringMonth : true;
+}
+
+function finishedPeriodLabel(period: string): string {
+  if (/^\d{4}$/.test(period)) return `${period}年`;
+  if (/^\d{4}-\d{2}$/.test(period)) {
+    const [year, month] = period.split("-");
+    return `${year}年${Number(month)}月`;
+  }
+  const recurringMonth = period.match(/^\*-(\d{2})$/)?.[1];
+  return recurringMonth ? `全期間の${Number(recurringMonth)}月` : period;
+}
+
+function shelfCriteriaCount(): number {
+  return [shelfCriteria.genre, shelfCriteria.rating, shelfCriteria.finishedPeriod].filter(value => value !== "").length;
+}
+
+function renderShelfFilterControls() {
+  const genreSelect = $<HTMLSelectElement>("#filter-genre");
+  const genres = [...new Set(books.map(book => book.genre).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ja"));
+  genreSelect.innerHTML = `<option value="">すべて</option>${genres.map(genre => `<option value="${escapeHtml(genre)}">${escapeHtml(genre)}</option>`).join("")}`;
+  genreSelect.value = shelfCriteria.genre;
+  $<HTMLSelectElement>("#filter-rating").value = shelfCriteria.rating;
+  $<HTMLInputElement>("#filter-month").value = /^\d{4}-\d{2}$/.test(shelfCriteria.finishedPeriod) ? shelfCriteria.finishedPeriod : "";
+
+  const chips: Array<{ key: string; label: string }> = [];
+  if (query.trim()) chips.push({ key: "query", label: `検索: ${query.trim()}` });
+  if (shelfCriteria.genre) chips.push({ key: "genre", label: shelfCriteria.genre });
+  if (shelfCriteria.rating !== "") chips.push({ key: "rating", label: shelfCriteria.rating === "0" ? "未評価" : `評価 ${shelfCriteria.rating}.0` });
+  if (shelfCriteria.finishedPeriod) chips.push({ key: "finishedPeriod", label: finishedPeriodLabel(shelfCriteria.finishedPeriod) });
+  $("#active-filter-chips").innerHTML = chips.map(chip => `<button type="button" data-clear-shelf-filter="${chip.key}" aria-label="${escapeHtml(chip.label)}の条件を解除"><span>${escapeHtml(chip.label)}</span><i data-lucide="x"></i></button>`).join("");
+  $("#active-filter-bar").hidden = chips.length === 0;
+
+  const count = shelfCriteriaCount();
+  const badge = $("#filter-count");
+  badge.textContent = String(count);
+  badge.hidden = count === 0;
+  iconize();
+}
+
 function renderBooks() {
   const sort = $<HTMLSelectElement>("#sort-books").value;
   const normalizedTerms = query.toLocaleLowerCase("ja").trim().split(/\s+/).filter(Boolean);
   const filtered = books
     .filter(book => book.status === activeFilter)
     .filter(book => normalizedTerms.every(term => `${book.title} ${book.author} ${book.isbn} ${book.genre}`.toLocaleLowerCase("ja").includes(term)))
+    .filter(book => !shelfCriteria.genre || book.genre === shelfCriteria.genre)
+    .filter(book => shelfCriteria.rating === "" || book.rating === Number(shelfCriteria.rating))
+    .filter(book => matchesFinishedPeriod(book, shelfCriteria.finishedPeriod))
     .sort((a, b) => {
       if (sort === "date-asc") return (a.finishedAt || a.createdAt).localeCompare(b.finishedAt || b.createdAt);
       if (sort === "rating-desc") return b.rating - a.rating;
@@ -351,6 +408,7 @@ function renderBooks() {
   $("#read-count").textContent = String(books.filter(book => book.status === "read").length);
   $("#reading-count").textContent = String(books.filter(book => book.status === "reading").length);
   $("#wishlist-count").textContent = String(books.filter(book => book.status === "wishlist").length);
+  renderShelfFilterControls();
 }
 
 function renderEmptyState(resultCount: number) {
@@ -358,7 +416,7 @@ function renderEmptyState(resultCount: number) {
   empty.hidden = resultCount > 0;
   if (resultCount > 0) return;
 
-  const hasQuery = query.trim().length > 0;
+  const hasQuery = query.trim().length > 0 || shelfCriteriaCount() > 0;
   const isFirstBook = books.length === 0;
   const title = $("#empty-title");
   const copy = $("#empty-copy");
@@ -484,7 +542,7 @@ function renderAnalytics() {
   $("#genre-donut").innerHTML = `<div><strong>${genres.length}</strong><span>ジャンル</span></div>`;
   $("#genre-legend").innerHTML = genres.length
     ? genres.map(([genre, count], index) => `
-      <div class="legend-row"><i style="background:${GENRE_COLORS[index % GENRE_COLORS.length]}"></i><span>${escapeHtml(genre)}</span><strong>${Math.round(count / readBooks.length * 100)}%</strong></div>`).join("")
+      <button class="legend-row" type="button" data-analytics-genre="${escapeHtml(genre)}" data-analytics-period="${selectedYear ?? ""}" aria-label="${escapeHtml(genre)}の本を本棚で見る"><i style="background:${GENRE_COLORS[index % GENRE_COLORS.length]}"></i><span>${escapeHtml(genre)}</span><strong>${Math.round(count / readBooks.length * 100)}%</strong><i data-lucide="arrow-up-right"></i></button>`).join("")
     : `<p class="analytics-empty">読了記録が増えると、ジャンルの割合が表示されます。</p>`;
 
   $("#analytics-summary").textContent = !readBooks.length
@@ -496,7 +554,7 @@ function renderAnalytics() {
   const maxMonth = Math.max(...monthly, 1);
   $("#month-chart").setAttribute("aria-label", `${selectedYear ?? "全期間"}の月別読了冊数`);
   $("#month-chart").innerHTML = monthly.map((count, index) => `
-    <div class="month-bar ${selectedYear === currentYear && index === currentMonth - 1 ? "current" : ""}"><strong>${count || ""}</strong><i style="--height:${Math.max(count / maxMonth * 82, count ? 20 : 3)}%"></i><span>${index + 1}月</span></div>`).join("");
+    <button class="month-bar ${selectedYear === currentYear && index === currentMonth - 1 ? "current" : ""}" type="button" data-analytics-month="${selectedYear === null ? `*-${String(index + 1).padStart(2, "0")}` : `${selectedYear}-${String(index + 1).padStart(2, "0")}`}" aria-label="${selectedYear ?? "全期間"}の${index + 1}月に読了した本 ${count}冊"><strong>${count || ""}</strong><i style="--height:${Math.max(count / maxMonth * 82, count ? 20 : 3)}%"></i><span>${index + 1}月</span></button>`).join("");
   $("#trend-signal").innerHTML = readBooks.length
     ? `<i data-lucide="activity"></i> ${readBooks.length}冊を集計`
     : `<i data-lucide="minus"></i> 記録なし`;
@@ -504,7 +562,7 @@ function renderAnalytics() {
   const ratingCounts = [5, 4, 3, 2, 1].map(rating => ({ rating, count: rated.filter(book => book.rating === rating).length }));
   const maxRating = Math.max(...ratingCounts.map(item => item.count), 1);
   $("#rating-bars").innerHTML = ratingCounts.map(item => `
-    <div class="rating-row"><strong>${item.rating}.0</strong><div class="rating-track"><i style="width:${item.count / maxRating * 100}%"></i></div><span>${item.count}</span></div>`).join("");
+    <button class="rating-row" type="button" data-analytics-rating="${item.rating}" data-analytics-period="${selectedYear ?? ""}" aria-label="評価${item.rating}の本を本棚で見る"><strong>${item.rating}.0</strong><div class="rating-track"><i style="width:${item.count / maxRating * 100}%"></i></div><span>${item.count}</span><i data-lucide="arrow-up-right"></i></button>`).join("");
 
   const insightTitle = $("#insight-title");
   const insightCopy = $("#insight-copy");
@@ -513,6 +571,7 @@ function renderAnalytics() {
     insightTitle.textContent = "記録から見えてくること";
     insightCopy.textContent = "読了記録が増えると、よく読むジャンルや満足度の高い領域が見えてきます。";
     insightButton.dataset.insightGenre = "";
+    insightButton.dataset.insightPeriod = "";
     insightButton.innerHTML = `最初の本を追加する <i data-lucide="arrow-right"></i>`;
   } else {
     const ratedByGenre = new Map<string, number[]>();
@@ -526,6 +585,7 @@ function renderAnalytics() {
       ? `「${escapeHtml(insightGenre)}」の平均評価は <strong>${highestRated.average.toFixed(1)}</strong>。この期間で満足度の高い領域です。`
       : `「${escapeHtml(insightGenre)}」を最も多く読んでいます。評価を付けると、満足度も比較できます。`;
     insightButton.dataset.insightGenre = insightGenre;
+    insightButton.dataset.insightPeriod = selectedYear === null ? "" : String(selectedYear);
     insightButton.innerHTML = `該当する本を見る <i data-lucide="arrow-right"></i>`;
   }
   iconize();
@@ -547,6 +607,7 @@ function navigate(screen: ScreenName) {
 
 function setFilter(filter: BookStatus) {
   activeFilter = filter;
+  if (filter !== "read" && shelfCriteria.finishedPeriod) shelfCriteria.finishedPeriod = "";
   $$(".shelf-tab").forEach(tab => {
     const isActive = tab.dataset.filter === filter;
     tab.classList.toggle("is-active", isActive);
@@ -555,11 +616,36 @@ function setFilter(filter: BookStatus) {
   renderBooks();
 }
 
+function resetShelfCriteria() {
+  shelfCriteria = { genre: "", rating: "", finishedPeriod: "" };
+}
+
+function clearAllShelfFilters() {
+  query = "";
+  resetShelfCriteria();
+  $<HTMLInputElement>("#library-search").value = "";
+  $("#search-panel").hidden = true;
+  $("#filter-panel").hidden = true;
+  $("#filter-toggle").setAttribute("aria-expanded", "false");
+  renderBooks();
+}
+
+function applyAnalyticsShelfFilter(criteria: Partial<ShelfCriteria>) {
+  query = "";
+  shelfCriteria = { genre: "", rating: "", finishedPeriod: "", ...criteria };
+  $<HTMLInputElement>("#library-search").value = "";
+  $("#search-panel").hidden = true;
+  $("#filter-panel").hidden = true;
+  $("#filter-toggle").setAttribute("aria-expanded", "false");
+  navigate("shelf");
+  setFilter("read");
+}
+
 function openAddDialog(mode: AddMode = "search") {
   setAddMode(mode);
   $<HTMLDialogElement>("#add-dialog").showModal();
   if (mode === "search") window.setTimeout(() => $<HTMLInputElement>("#catalog-search").focus(), 50);
-  if (mode === "manual") window.setTimeout(() => $<HTMLInputElement>("#manual-form [name=title]").focus(), 50);
+  if (mode === "manual") window.setTimeout(() => $<HTMLInputElement>("#manual-book-query").focus(), 50);
 }
 
 function closeDialog(id: string) {
@@ -582,6 +668,49 @@ function setAddMode(mode: AddMode) {
     visibleCatalogBooks = [];
     renderCatalogResults([], "ISBNを入力すると、openBDから書誌情報を取得します。");
   }
+  if (mode === "manual") setManualStage("search");
+}
+
+function renderManualSelectedSummary(book: CatalogBook | null) {
+  const summary = $("#manual-selected-summary");
+  if (!book) {
+    summary.innerHTML = `<div class="selected-book-placeholder"><i data-lucide="pencil-line"></i></div><div><span class="section-kicker">DIRECT ENTRY</span><strong>書誌情報を入力してください</strong><small>タイトルと著者だけでも登録できます。</small></div>`;
+    iconize();
+    return;
+  }
+  const metadata = [book.publisher, book.isbn ? `ISBN ${book.isbn}` : "ISBNなし"].filter(Boolean).join(" · ");
+  summary.innerHTML = `<div class="result-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">${catalogCoverImageMarkup(book)}</div><div><span class="section-kicker">SELECTED BOOK</span><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)}${metadata ? `<br>${escapeHtml(metadata)}` : ""}</small></div>`;
+  iconize();
+}
+
+function setManualStage(stage: ManualStage, directEntry = false) {
+  const form = $<HTMLFormElement>("#manual-form");
+  form.dataset.stage = stage;
+  if (stage === "search") {
+    window.setTimeout(() => $<HTMLInputElement>("#manual-book-query").focus(), 50);
+  } else {
+    renderManualSelectedSummary(directEntry ? null : selectedManualCatalogBook);
+    const details = $<HTMLDetailsElement>("#manual-details");
+    details.open = directEntry;
+    $<HTMLDialogElement>("#add-dialog").scrollTo({ top: 0, behavior: "smooth" });
+    if (directEntry) window.setTimeout(() => $<HTMLInputElement>('#manual-form [name="title"]').focus(), 80);
+  }
+  iconize();
+}
+
+function prepareDirectManualEntry() {
+  selectedManualCatalogBook = null;
+  const form = $<HTMLFormElement>("#manual-form");
+  ["title", "author", "publisher", "isbn", "pages", "notes", "review"].forEach(name => {
+    const input = form.elements.namedItem(name);
+    if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) input.value = "";
+  });
+  $<HTMLInputElement>('[name="genre"]', form).value = "その他";
+  $<HTMLSelectElement>('[name="status"]', form).value = "read";
+  $<HTMLSelectElement>('[name="rating"]', form).value = "0";
+  $<HTMLInputElement>("#manual-finished-at").value = todayIso();
+  syncManualFinishedAt();
+  setManualStage("confirm", true);
 }
 
 function renderCatalogResults(results: CatalogBook[], emptyMessage = "書誌情報が見つかりませんでした。手入力で登録できます。") {
@@ -661,6 +790,32 @@ function renderManualSearchResults(results: CatalogBook[], emptyMessage = "タ�
   iconize();
 }
 
+async function hydrateManualSearchCovers(results: CatalogBook[], request: AbortController) {
+  const candidates = results.filter(book => !book.coverUrl && isValidIsbn(book.isbn)).slice(0, 12);
+  await Promise.allSettled(candidates.map(async book => {
+    const coverUrl = await findGoogleBooksCoverByIsbn(book.isbn, request.signal);
+    if (!coverUrl || request.signal.aborted) return;
+    book.coverUrl = coverUrl;
+    book.coverSource = "googlebooks";
+  }));
+  if (request.signal.aborted || manualSearchRequest !== request) return;
+  const selectedIndex = selectedManualCatalogBook ? results.indexOf(selectedManualCatalogBook) : -1;
+  renderManualSearchResults(results, undefined, selectedIndex);
+}
+
+function updateNdlSearchLink(searchTerm: string) {
+  const link = $<HTMLAnchorElement>("#manual-search-ndl");
+  if (!searchTerm.trim()) {
+    link.hidden = true;
+    return;
+  }
+  const url = new URL("https://ndlsearch.ndl.go.jp/api/openurl");
+  url.searchParams.set("genre", "book");
+  url.searchParams.set("any", searchTerm.trim());
+  link.href = url.href;
+  link.hidden = false;
+}
+
 async function searchManualBooks(searchTerm: string) {
   const term = searchTerm.trim();
   manualSearchRequest?.abort();
@@ -669,12 +824,14 @@ async function searchManualBooks(searchTerm: string) {
   if (!term) {
     visibleManualSearchBooks = [];
     renderManualSearchResults([], "タイトル、著者、出版社、ISBNのいずれかを入力してください。");
-    $("#manual-search-source").textContent = "検索語を入力すると、Open Libraryから候補を探します。";
+    $("#manual-search-source").textContent = "検索語を入力すると、Open Libraryの収録範囲から候補を探します。";
+    updateNdlSearchLink("");
     return;
   }
 
   const request = new AbortController();
   manualSearchRequest = request;
+  updateNdlSearchLink(term);
   $("#manual-search-source").textContent = "本の候補を検索しています…";
   $("#manual-search-results").innerHTML = '<p class="catalog-empty">Open Libraryを検索中です。</p>';
 
@@ -684,8 +841,13 @@ async function searchManualBooks(searchTerm: string) {
     visibleManualSearchBooks = results;
     renderManualSearchResults(results, "候補が見つかりませんでした。入力欄へ直接記入できます。");
     $("#manual-search-source").textContent = results.length
-      ? `${results.length}件の候補です。選ぶと下の入力欄へ反映します。`
-      : "候補が見つかりませんでした。検索語を変えるか、下の入力欄へ直接記入してください。";
+      ? `${results.length}件の候補です。ISBNのある候補は表紙も確認しています。`
+      : "Open Libraryの収録範囲では候補が見つかりませんでした。直接入力、または国立国会図書館サーチで確認できます。";
+    await hydrateManualSearchCovers(results, request);
+    if (request.signal.aborted) return;
+    $("#manual-search-source").textContent = results.length
+      ? `${results.length}件の候補です。選ぶと確認画面へ進みます。`
+      : $("#manual-search-source").textContent;
   } catch (error) {
     if (request.signal.aborted) return;
     visibleManualSearchBooks = [];
@@ -708,8 +870,16 @@ function selectManualSearchBook(index: number) {
   $<HTMLInputElement>('[name="genre"]', form).value = book.genre || "その他";
   $<HTMLInputElement>('[name="pages"]', form).value = book.pages ? String(book.pages) : "";
   renderManualSearchResults(visibleManualSearchBooks, undefined, index);
-  $("#manual-search-source").textContent = `「${book.title}」を入力欄へ反映しました。内容を確認してから追加してください。`;
-  showToast("書誌情報を入力欄へ反映しました");
+  syncManualFinishedAt();
+  setManualStage("confirm");
+  showToast("候補を選びました。内容を確認してください");
+}
+
+function syncManualFinishedAt() {
+  const status = $<HTMLSelectElement>('#manual-form [name="status"]').value;
+  const finishedAt = $<HTMLInputElement>("#manual-finished-at");
+  finishedAt.disabled = status !== "read";
+  if (status === "read" && !finishedAt.value) finishedAt.value = todayIso();
 }
 
 function stopBarcodeScanner() {
@@ -1046,6 +1216,39 @@ function initializeEvents() {
     const manualResultButton = target.closest<HTMLElement>("[data-manual-result-index]");
     if (manualResultButton?.dataset.manualResultIndex) selectManualSearchBook(Number(manualResultButton.dataset.manualResultIndex));
 
+    const clearShelfFilter = target.closest<HTMLElement>("[data-clear-shelf-filter]");
+    if (clearShelfFilter?.dataset.clearShelfFilter) {
+      const key = clearShelfFilter.dataset.clearShelfFilter;
+      if (key === "query") {
+        query = "";
+        $<HTMLInputElement>("#library-search").value = "";
+        $("#search-panel").hidden = true;
+      }
+      if (key === "genre") shelfCriteria.genre = "";
+      if (key === "rating") shelfCriteria.rating = "";
+      if (key === "finishedPeriod") shelfCriteria.finishedPeriod = "";
+      renderBooks();
+    }
+
+    const analyticsGenre = target.closest<HTMLElement>("[data-analytics-genre]");
+    if (analyticsGenre?.dataset.analyticsGenre) {
+      applyAnalyticsShelfFilter({
+        genre: analyticsGenre.dataset.analyticsGenre,
+        finishedPeriod: analyticsGenre.dataset.analyticsPeriod || "",
+      });
+    }
+
+    const analyticsMonth = target.closest<HTMLElement>("[data-analytics-month]");
+    if (analyticsMonth?.dataset.analyticsMonth) applyAnalyticsShelfFilter({ finishedPeriod: analyticsMonth.dataset.analyticsMonth });
+
+    const analyticsRating = target.closest<HTMLElement>("[data-analytics-rating]");
+    if (analyticsRating?.dataset.analyticsRating) {
+      applyAnalyticsShelfFilter({
+        rating: analyticsRating.dataset.analyticsRating,
+        finishedPeriod: analyticsRating.dataset.analyticsPeriod || "",
+      });
+    }
+
     const ratingButton = target.closest<HTMLElement>(".rating-control [data-rating]");
     if (ratingButton) {
       const rating = Number(ratingButton.dataset.rating);
@@ -1076,15 +1279,45 @@ function initializeEvents() {
 
   $("#open-add").addEventListener("click", () => openAddDialog());
   $("#bottom-add").addEventListener("click", () => openAddDialog());
-  $("#search-toggle").addEventListener("click", () => { $("#search-panel").hidden = false; $<HTMLInputElement>("#library-search").focus(); });
+  $("#search-toggle").addEventListener("click", () => {
+    $("#filter-panel").hidden = true;
+    $("#filter-toggle").setAttribute("aria-expanded", "false");
+    $("#search-panel").hidden = false;
+    $<HTMLInputElement>("#library-search").focus();
+  });
+  $("#filter-toggle").addEventListener("click", () => {
+    const panel = $("#filter-panel");
+    const willOpen = panel.hidden;
+    panel.hidden = !willOpen;
+    $("#filter-toggle").setAttribute("aria-expanded", String(willOpen));
+    if (willOpen) {
+      $("#search-panel").hidden = true;
+      renderShelfFilterControls();
+    }
+  });
+  $("#close-filter").addEventListener("click", () => {
+    $("#filter-panel").hidden = true;
+    $("#filter-toggle").setAttribute("aria-expanded", "false");
+  });
   $("#close-search").addEventListener("click", () => { query = ""; $<HTMLInputElement>("#library-search").value = ""; $("#search-panel").hidden = true; renderBooks(); });
   $<HTMLInputElement>("#library-search").addEventListener("input", event => { query = (event.currentTarget as HTMLInputElement).value; renderBooks(); });
+  $<HTMLSelectElement>("#filter-genre").addEventListener("change", event => { shelfCriteria.genre = (event.currentTarget as HTMLSelectElement).value; renderBooks(); });
+  $<HTMLSelectElement>("#filter-rating").addEventListener("change", event => { shelfCriteria.rating = (event.currentTarget as HTMLSelectElement).value; renderBooks(); });
+  $<HTMLInputElement>("#filter-month").addEventListener("change", event => {
+    shelfCriteria.finishedPeriod = (event.currentTarget as HTMLInputElement).value;
+    if (shelfCriteria.finishedPeriod) setFilter("read");
+    else renderBooks();
+  });
+  $("#clear-criteria").addEventListener("click", () => { resetShelfCriteria(); renderBooks(); });
+  $("#clear-all-filters").addEventListener("click", clearAllShelfFilters);
   $("#sort-books").addEventListener("change", renderBooks);
   $<HTMLSelectElement>("#analytics-year").addEventListener("change", renderAnalytics);
   $<HTMLInputElement>("#catalog-search").addEventListener("input", event => scheduleCatalogSearch((event.currentTarget as HTMLInputElement).value));
   $("#start-barcode-scan").addEventListener("click", () => { void startBarcodeScanner(); });
   $("#stop-barcode-scan").addEventListener("click", stopBarcodeScanner);
   $("#manual-book-search").addEventListener("click", () => { void searchManualBooks($<HTMLInputElement>("#manual-book-query").value); });
+  $("#manual-enter-directly").addEventListener("click", prepareDirectManualEntry);
+  $("#manual-back-to-search").addEventListener("click", () => setManualStage("search"));
   $<HTMLInputElement>("#manual-book-query").addEventListener("keydown", event => {
     if (event.key !== "Enter") return;
     event.preventDefault();
@@ -1099,12 +1332,6 @@ function initializeEvents() {
     renderBooks();
   });
 
-  const syncManualFinishedAt = () => {
-    const status = $<HTMLSelectElement>('#manual-form [name="status"]').value;
-    const finishedAt = $<HTMLInputElement>("#manual-finished-at");
-    finishedAt.disabled = status !== "read";
-    if (status === "read" && !finishedAt.value) finishedAt.value = todayIso();
-  };
   $<HTMLSelectElement>('#manual-form [name="status"]').addEventListener("change", syncManualFinishedAt);
   syncManualFinishedAt();
 
@@ -1117,7 +1344,11 @@ function initializeEvents() {
     const isbnInput = $<HTMLInputElement>('[name="isbn"]', form);
     const rawIsbn = String(data.get("isbn") || "").trim();
     isbnInput.setCustomValidity(rawIsbn && !isValidIsbn(rawIsbn) ? "ISBN-10またはISBN-13を確認してください" : "");
-    if (!form.reportValidity()) return;
+    if (!form.checkValidity()) {
+      $<HTMLDetailsElement>("#manual-details").open = true;
+      form.reportValidity();
+      return;
+    }
     const title = String(data.get("title") || "").trim();
     const author = String(data.get("author") || "").trim();
     const normalizedInputIsbn = rawIsbn ? normalizeIsbn(rawIsbn) : "";
@@ -1162,10 +1393,12 @@ function initializeEvents() {
     selectedManualCatalogBook = null;
     visibleManualSearchBooks = [];
     $<HTMLInputElement>("#manual-book-query").value = "";
-    $("#manual-search-source").textContent = "候補を選ぶと、下の入力欄へ書誌情報を反映します。";
+    $("#manual-search-source").textContent = "候補を選ぶと、確認画面へ進みます。";
+    updateNdlSearchLink("");
     renderManualSearchResults([]);
     $<HTMLInputElement>("#manual-finished-at").value = todayIso();
     syncManualFinishedAt();
+    setManualStage("search");
     closeDialog("add-dialog");
     showToast("新しい本を追加しました");
     queuePriorityCoverLookup(candidate.id);
@@ -1194,12 +1427,7 @@ function initializeEvents() {
       openAddDialog("search");
       return;
     }
-    navigate("shelf");
-    setFilter("read");
-    query = genre;
-    $("#search-panel").hidden = false;
-    $<HTMLInputElement>("#library-search").value = query;
-    renderBooks();
+    applyAnalyticsShelfFilter({ genre, finishedPeriod: (event.currentTarget as HTMLElement).dataset.insightPeriod || "" });
   });
 
   $$<HTMLDialogElement>('dialog').forEach(dialog => dialog.addEventListener("click", event => {

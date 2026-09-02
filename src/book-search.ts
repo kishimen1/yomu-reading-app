@@ -2,6 +2,7 @@ import type { Book, CatalogBook } from "./data";
 import { isValidIsbn, normalizeIsbn } from "./openbd";
 
 const OPEN_LIBRARY_SEARCH_ENDPOINT = "https://openlibrary.org/search.json";
+const OPEN_LIBRARY_SEARCH_LIMIT = 24;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -109,7 +110,7 @@ async function fetchOpenLibraryDocuments(searchTerm: string, limit: number, sign
 }
 
 export async function searchOpenLibraryBooks(searchTerm: string, signal?: AbortSignal): Promise<CatalogBook[]> {
-  const docs = await fetchOpenLibraryDocuments(searchTerm, 8, signal);
+  const docs = await fetchOpenLibraryDocuments(searchTerm, OPEN_LIBRARY_SEARCH_LIMIT, signal);
   const seen = new Set<string>();
   return docs
       .map(toCatalogBook)

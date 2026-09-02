@@ -78,17 +78,38 @@ def run() -> None:
         page.on("pageerror", lambda error: errors.append(str(error)))
 
         openbd_records = {}
-        google_books_covers = {}
+        google_books_covers = {
+            "9784003210543": "https://books.google.com/books/content?id=GB-YOMU-IWANAMI&printsec=frontcover&img=1&zoom=5",
+        }
+        manual_search_requests = []
         open_library_docs = {
-            "境界を歩く 佐伯 凛": [{
-                "key": "/works/OL-YOMU-1W",
-                "title": "境界を歩く",
-                "author_name": ["佐伯 凛"],
-                "publisher": ["検索出版社"],
-                "isbn": ["9784101010014"],
-                "number_of_pages_median": 180,
-                "cover_i": 101,
-            }],
+            "境界を歩く 佐伯 凛": [
+                {
+                    "key": "/works/OL-YOMU-1W",
+                    "title": "境界を歩く",
+                    "author_name": ["佐伯 凛"],
+                    "publisher": ["検索出版社"],
+                    "isbn": ["9784101010014"],
+                    "number_of_pages_median": 180,
+                    "cover_i": 101,
+                },
+                {
+                    "key": "/works/OL-YOMU-2W",
+                    "title": "境界を歩く 新装版",
+                    "author_name": ["佐伯 凛"],
+                    "publisher": ["岩波書店"],
+                    "isbn": ["9784003210543"],
+                    "number_of_pages_median": 224,
+                },
+                {
+                    "key": "/works/OL-YOMU-3W",
+                    "title": "境界を歩く研究",
+                    "author_name": ["研究会"],
+                    "publisher": ["検索出版社"],
+                    "isbn": [],
+                    "number_of_pages_median": 144,
+                },
+            ],
         }
 
         def handle_openbd(route):
@@ -97,7 +118,9 @@ def run() -> None:
             route.fulfill(status=200, content_type="application/json", body=json.dumps([record] if record else [None], ensure_ascii=False))
 
         def handle_open_library(route):
-            query = parse_qs(urlparse(route.request.url).query).get("q", [""])[0]
+            parameters = parse_qs(urlparse(route.request.url).query)
+            query = parameters.get("q", [""])[0]
+            manual_search_requests.append(parameters)
             documents = open_library_docs.get(query, [])
             route.fulfill(status=200, content_type="application/json", body=json.dumps({"numFound": len(documents), "docs": documents}, ensure_ascii=False))
 
@@ -145,12 +168,22 @@ def run() -> None:
         page.locator("#manual-book-search").click()
         manual_result = page.get_by_role("button", name="境界を歩くを入力欄に反映")
         manual_result.wait_for()
+        assert page.locator("#manual-search-results .manual-search-result").count() == 3
+        assert manual_search_requests[-1]["limit"] == ["24"]
+        page.wait_for_function("document.querySelectorAll('#manual-search-results .result-cover.has-real-cover').length >= 2")
+        assert page.locator("#manual-search-ndl").is_visible()
         page.screenshot(path=str(ARTIFACTS / "mobile-title-author-search.png"), full_page=True)
         manual_result.click()
+        assert page.locator("#manual-confirm-stage").is_visible()
+        assert not page.locator("#manual-search-stage").is_visible()
+        assert not page.locator("#manual-details").get_attribute("open")
+        assert "境界を歩く" in page.locator("#manual-selected-summary").inner_text()
+        page.screenshot(path=str(ARTIFACTS / "mobile-title-author-confirm.png"), full_page=True)
         assert form.locator("[name=title]").input_value() == "境界を歩く"
         assert form.locator("[name=author]").input_value() == "佐伯 凛"
         assert form.locator("[name=publisher]").input_value() == "検索出版社"
         assert form.locator("[name=isbn]").input_value() == "9784101010014"
+        page.locator("#manual-details summary").click()
         form.locator("[name=genre]").fill("文学・小説")
         form.locator("[name=pages]").fill("180")
         form.locator("[name=finishedAt]").fill(today)
@@ -262,7 +295,30 @@ def run() -> None:
         page.wait_for_timeout(250)
         page.screenshot(path=str(ARTIFACTS / "mobile-analytics.png"), full_page=True)
 
-        page.locator(".bottom-nav [data-nav=shelf]").click()
+        page.locator('#genre-legend [data-analytics-genre="文学・小説"]').click()
+        assert page.locator("#screen-shelf").get_attribute("class").find("is-active") >= 0
+        assert "文学・小説" in page.locator("#active-filter-bar").inner_text()
+        assert page.locator("#book-grid .book-card").count() == 1
+        page.locator("#clear-all-filters").click()
+        assert page.locator("#active-filter-bar").is_hidden()
+
+        page.locator(".bottom-nav [data-nav=analytics]").click()
+        page.locator(f'[data-analytics-month="{today[:7]}"]').click()
+        assert f"{today[:4]}年{int(today[5:7])}月" in page.locator("#active-filter-bar").inner_text()
+        assert page.locator("#book-grid .book-card").count() == 1
+        page.locator("#clear-all-filters").click()
+
+        page.locator("#filter-toggle").click()
+        page.locator("#filter-genre").select_option(label="文学・小説")
+        page.locator("#filter-rating").select_option("4")
+        page.locator("#filter-month").fill(today[:7])
+        page.locator("#filter-month").dispatch_event("change")
+        assert page.locator("#filter-count").inner_text() == "3"
+        assert page.locator("#book-grid .book-card").count() == 1
+        page.screenshot(path=str(ARTIFACTS / "mobile-shelf-filters.png"), full_page=True)
+        page.locator("#clear-criteria").click()
+        assert page.locator("#filter-count").is_hidden()
+        page.locator("#close-filter").click()
         page.wait_for_timeout(250)
         page.screenshot(path=str(ARTIFACTS / "mobile-shelf.png"), full_page=True)
 
@@ -597,7 +653,7 @@ def run() -> None:
         pwa_context.close()
         browser.close()
 
-    print("PASS: real covers, camera ISBN, title/author search, manual records, migration, exports, offline PWA, and responsive layouts")
+    print("PASS: staged mobile add, candidate covers, shelf filters, analytics drill-down, camera ISBN, persistence, migration, exports, offline PWA, and responsive layouts")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 
 ## 1. 現在地
 
-YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHTTPS公開済みで、Androidのホーム画面追加も実機確認済み。v1.3.0では、openBD、Google Books、Open Libraryによる実在表紙の自動補完を行い、保存済みの本も順次更新できる。
+YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHTTPS公開済みで、Androidのホーム画面追加も実機確認済み。v1.4.0では、スマホの本追加を検索・確認の2段階にし、検索候補の書影補完、本棚の複合絞り込み、分析グラフから本棚への絞り込みを追加した。
 
 - 作業ディレクトリ: `C:\Users\ZA-KESSAN-11\Documents\読書管理アプリ`
 - ブランチ: `main`
@@ -20,10 +20,11 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 - 初回は空の本棚と明確な登録導線を表示
 - 旧試作版の架空デモ本だけをID＋書名の完全一致で一度だけ除去
 - 利用者の既存記録、旧v1キー、v1から移行した記録を保持
-- 読んだ／読書中／読みたい、グリッド／リスト、AND検索、並び替え
+- 読んだ／読書中／読みたい、グリッド／リスト、AND検索、ジャンル・評価・読了月の複合絞り込み、並び替え
 - openBDによるISBN-10／ISBN-13の実書誌検索と登録先選択
 - 対応ブラウザーのBarcodeDetectorによるISBN-13（EAN-13）カメラ読み取り
-- Open Libraryによる書名・著者・出版社・ISBN検索と手入力欄への候補反映
+- スマホ向けの検索→確認の2段階追加フロー
+- Open Libraryによる書名・著者・出版社・ISBN検索、ISBN候補のGoogle Books書影補完、手入力欄への候補反映
 - openBD優先、Google Books、Open Libraryの順で補完する実在表紙の自動取得
 - 保存済み・手入力・CSV取込を含む表紙のバックグラウンド補完と詳細画面からの再取得
 - 画像なし判定の30日保持、ISBNなしでは書名・著者の厳密一致、読込失敗時の代替表紙
@@ -51,7 +52,7 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 | `src/book-covers.ts` | 表紙取得順、厳密一致、30日再検索判定 |
 | `src/styles.css` | モバイル／タブレット／デスクトップUI |
 | `public/manifest.json` | PWAマニフェスト |
-| `public/sw.js` | オフラインキャッシュ `yomu-shell-v9` |
+| `public/sw.js` | オフラインキャッシュ `yomu-shell-v10` |
 | `.github/workflows/deploy-pages.yml` | `main` push時のGitHub Pages公開 |
 | `tests/verify_app.py` | 本番プレビューを使うPlaywright回帰テスト |
 
@@ -93,7 +94,7 @@ npm test
 ## 5. 保存・プライバシー
 
 - 読書記録は利用者の端末内に保存し、GitHubには送らない。
-- 書誌検索と表紙補完では、ISBNまたは書名・著者をopenBD、Google Books、Open Libraryへ送る。
+- 書誌検索と表紙補完では、ISBNまたは書名・著者をopenBD、Google Books、Open Libraryへ送る。国立国会図書館サーチの確認リンクを開いた場合は、その検索語を同サイトへ送る。
 - カメラ映像はブラウザー内で処理し、保存・送信しない。
 - 機種変更、アプリ削除、ブラウザーデータ削除の前にJSON完全バックアップが必要。
 - 外部書影URLは永続キャッシュしない。書影がなくても記録本文は保持する。
@@ -103,7 +104,7 @@ npm test
 - ログイン、端末間同期、クラウドバックアップは未実装。
 - カメラ読み取りはHTTPSとBarcodeDetector対応ブラウザーが必要。非対応時はISBN入力へ戻る。
 - openBD／Google Books／Open Libraryに未収録の本は直接入力が必要。
-- Open Libraryの候補は作品単位の情報を含むため、版・ページ数・出版社を登録前に確認する。
+- Open Libraryの候補は作品単位の情報を含み、日本語書籍を網羅しない。版・ページ数・出版社を登録前に確認し、候補が少ない場合は国立国会図書館サーチ確認リンクまたはISBN検索を使う。
 - localStorageを端末DBとして使うため、大量データ向けSQLiteや全文検索は未実装。
 - ブラウザーデータ削除時は、事前バックアップがなければ記録を復旧できない。
 - 外部書影はオフライン時に表示できない場合がある。
