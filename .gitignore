@@ -16,3 +16,7 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+
+# Python test caches
+__pycache__/
+*.py[cod]

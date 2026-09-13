@@ -1,10 +1,16 @@
 # YOMU 読書記録PWA 引継書
 
-更新日: 2026-08-31
+更新日: 2026-09-14
+
+## v1.5.0：スマホUI改善の引継ぎ
+
+本棚の2列表示、全件タブ、感想・メモ検索、表示設定の復元、閲覧／編集の分離、登録確認の統一、戻る操作と未保存確認を追加。`src/shelf-state.ts` が本棚検索と表示設定、`src/navigation.ts` が履歴遷移を管理する。書籍スキーマと旧保存キーは変更していない。
+
+`npm test` は既存回帰と `tests/verify_mobile_ux.py` を実行する。比較画像は `artifacts/`、実機確認手順は `MOBILE_UX_CHECK.md`。利用者はGitHub Pagesへの公開を承認済み。リリースはアプリ版 `1.5.0`、SWキャッシュ `yomu-shell-v11`。公開時はActionsと公開HTTP応答を確認し、利用者とAndroid実機で検証する。今回のUI変更に対する実機確認は未実施。
 
 ## 1. 現在地
 
-YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHTTPS公開済みで、Androidのホーム画面追加も実機確認済み。v1.4.0では、スマホの本追加を検索・確認の2段階にし、検索候補の書影補完、本棚の複合絞り込み、分析グラフから本棚への絞り込みを追加した。
+YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHTTPS公開し、以前の版でAndroidのホーム画面追加を実機確認済み。v1.5.0では本棚での探しやすさ、感想の読み返し、編集・登録と戻る操作を改善した。v1.4.0で追加した検索候補の書影補完、本棚の複合絞り込み、分析グラフから本棚への絞り込みも維持している。
 
 - 作業ディレクトリ: `C:\Users\ZA-KESSAN-11\Documents\読書管理アプリ`
 - ブランチ: `main`
@@ -20,7 +26,7 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 - 初回は空の本棚と明確な登録導線を表示
 - 旧試作版の架空デモ本だけをID＋書名の完全一致で一度だけ除去
 - 利用者の既存記録、旧v1キー、v1から移行した記録を保持
-- 読んだ／読書中／読みたい、グリッド／リスト、AND検索、ジャンル・評価・読了月の複合絞り込み、並び替え
+- すべて／読了／読書中／読みたい、2列グリッド／リスト、感想・メモを含むAND検索、複合絞り込み、並び替え、表示設定の復元
 - openBDによるISBN-10／ISBN-13の実書誌検索と登録先選択
 - 対応ブラウザーのBarcodeDetectorによるISBN-13（EAN-13）カメラ読み取り
 - スマホ向けの検索→確認の2段階追加フロー
@@ -29,7 +35,7 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 - 保存済み・手入力・CSV取込を含む表紙のバックグラウンド補完と詳細画面からの再取得
 - 画像なし判定の30日保持、ISBNなしでは書名・著者の厳密一致、読込失敗時の代替表紙
 - 手入力によるISBN、ジャンル、ページ数、状態、読了日、評価、メモ、感想の登録
-- 詳細画面でタイトル、著者、ISBN、ジャンル、ページ数、出版社、状態、読了日、評価、メモ、感想を編集
+- 詳細画面で感想・メモを閲覧し、別の編集画面で書誌情報・読書記録を編集。未保存確認と保存失敗時の入力保持に対応
 - ISBN優先、ISBNなしは書名＋著者による重複検知
 - 選択年／全期間の読了数、ページ数、平均評価、著者数、ジャンル構成、月別推移、評価分布
 - UTF-8 BOM付きYOMU CSV出力、YOMU／ビブリアCSV取込
@@ -44,6 +50,8 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 | --- | --- |
 | `index.html` | 画面構造、登録・詳細ダイアログ、PWAメタ情報 |
 | `src/main.ts` | 状態管理、登録・編集、分析、入出力 |
+| `src/shelf-state.ts` | 本棚検索、絞り込み、表示設定の保存・復元 |
+| `src/navigation.ts` | 画面履歴、戻る操作、未保存確認 |
 | `src/data.ts` | 型、スキーマv2、正規化、v1移行、旧デモ除去 |
 | `src/csv.ts` | CSV解析、ビブリア変換、重複検知 |
 | `src/openbd.ts` | ISBN検証、openBD API接続 |
@@ -52,9 +60,10 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 | `src/book-covers.ts` | 表紙取得順、厳密一致、30日再検索判定 |
 | `src/styles.css` | モバイル／タブレット／デスクトップUI |
 | `public/manifest.json` | PWAマニフェスト |
-| `public/sw.js` | オフラインキャッシュ `yomu-shell-v10` |
+| `public/sw.js` | オフラインキャッシュ `yomu-shell-v11` |
 | `.github/workflows/deploy-pages.yml` | `main` push時のGitHub Pages公開 |
 | `tests/verify_app.py` | 本番プレビューを使うPlaywright回帰テスト |
+| `tests/verify_mobile_ux.py` | モバイルUX、保存失敗、1,000冊、画面幅の回帰テスト |
 
 主要localStorageキー:
 
@@ -62,6 +71,7 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 yomu-reading-archive:v2
 yomu-settings:v2
 yomu-demo-library-cleanup:v1
+yomu-shelf-preferences:v1
 ```
 
 旧 `:v1` キーは読み取り移行後も削除しない。

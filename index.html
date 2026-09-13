@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#f4f6f3">
   <meta name="description" content="読書記録と読書傾向を一つにまとめる、端末保存型のAndroid対応PWA">
   <title>YOMU - 読書の記録と分析</title>
@@ -40,55 +40,33 @@
             <h1 id="shelf-title">わたしの本棚</h1>
           </div>
           <div class="header-actions">
-            <button class="icon-button" id="search-toggle" type="button" aria-label="本棚を検索" title="本棚を検索"><i data-lucide="search"></i></button>
+
             <button class="icon-button filter-toggle" id="filter-toggle" type="button" aria-label="本棚を絞り込む" title="本棚を絞り込む" aria-expanded="false"><i data-lucide="list-filter"></i><span class="control-badge" id="filter-count" hidden>0</span></button>
             <button class="primary-button" id="open-add" type="button"><i data-lucide="book-plus"></i><span>本を追加</span></button>
           </div>
         </header>
 
-        <div class="search-panel" id="search-panel" hidden>
+        <div class="search-panel" id="search-panel">
           <i data-lucide="search"></i>
-          <input id="library-search" type="search" placeholder="タイトル・著者・ISBNで検索" autocomplete="off">
-          <button class="icon-button compact" id="close-search" type="button" aria-label="検索を閉じる"><i data-lucide="x"></i></button>
+          <input id="library-search" type="search" aria-label="本棚の本や感想を検索" placeholder="本や感想の言葉から検索" autocomplete="off" enterkeyhint="search">
+          <button class="icon-button compact" id="close-search" type="button" aria-label="検索語を消す"><i data-lucide="x"></i></button>
         </div>
-
-        <section class="library-filter-panel" id="filter-panel" aria-label="本棚の絞り込み" hidden>
-          <div class="filter-panel-heading"><div><span class="section-kicker">FILTER</span><strong>本棚を条件で絞り込む</strong></div><button class="icon-button compact" id="close-filter" type="button" aria-label="絞り込みを閉じる"><i data-lucide="x"></i></button></div>
-          <div class="filter-controls">
-            <label class="field"><span>ジャンル</span><select id="filter-genre"><option value="">すべて</option></select></label>
-            <label class="field"><span>評価</span><select id="filter-rating"><option value="">すべて</option><option value="5">5.0</option><option value="4">4.0</option><option value="3">3.0</option><option value="2">2.0</option><option value="1">1.0</option><option value="0">未評価</option></select></label>
-            <label class="field"><span>読了月</span><input id="filter-month" type="month"></label>
-          </div>
-          <button class="text-button" id="clear-criteria" type="button">絞り込み条件を解除</button>
-        </section>
 
         <div class="active-filter-bar" id="active-filter-bar" hidden>
           <div id="active-filter-chips" aria-label="適用中の絞り込み"></div>
           <button class="text-button" id="clear-all-filters" type="button">すべて解除</button>
         </div>
 
-        <div class="shelf-overview">
-          <div class="overview-copy">
-            <span class="section-kicker">READING PULSE</span>
-            <p>今月は <strong id="month-count">3冊</strong> 読了。<br><span id="pace-copy">先月より1冊多いペースです。</span></p>
-          </div>
-          <div class="mini-bars" aria-label="直近6か月の読了冊数">
-            <span style="--bar: 35%"><small>3月</small></span>
-            <span style="--bar: 58%"><small>4月</small></span>
-            <span style="--bar: 42%"><small>5月</small></span>
-            <span style="--bar: 74%"><small>6月</small></span>
-            <span style="--bar: 54%"><small>7月</small></span>
-            <span class="current" style="--bar: 88%"><small>8月</small></span>
-          </div>
-        </div>
+        <button class="shelf-pulse" id="shelf-pulse" data-nav="analytics" type="button"><span>今月 <strong id="month-count">0冊</strong> 読了</span><span>分析を見る <i data-lucide="arrow-up-right"></i></span></button>
 
         <div class="library-toolbar">
           <div class="shelf-tabs" role="tablist" aria-label="本棚の種類">
-            <button class="shelf-tab is-active" role="tab" aria-selected="true" data-filter="read">読んだ <span id="read-count">0</span></button>
+            <button class="shelf-tab is-active" role="tab" aria-selected="true" data-filter="all">すべて <span id="all-count">0</span></button>
+            <button class="shelf-tab" role="tab" aria-selected="false" data-filter="read">読了 <span id="read-count">0</span></button>
             <button class="shelf-tab" role="tab" aria-selected="false" data-filter="reading">読書中 <span id="reading-count">0</span></button>
             <button class="shelf-tab" role="tab" aria-selected="false" data-filter="wishlist">読みたい <span id="wishlist-count">0</span></button>
           </div>
-          <div class="toolbar-actions">
+          <div class="toolbar-actions"><span id="shelf-result-count" role="status" aria-live="polite"></span>
             <label class="select-control">
               <span class="sr-only">並び順</span>
               <select id="sort-books">
@@ -106,7 +84,7 @@
           </div>
         </div>
 
-        <div class="book-grid" id="book-grid" aria-live="polite"></div>
+        <div class="book-grid" id="book-grid"></div>
         <div class="empty-state" id="empty-state" hidden>
           <span class="empty-mark"><i data-lucide="book-open"></i></span>
           <span class="section-kicker">YOUR FIRST SHELF</span>
@@ -115,6 +93,7 @@
           <div class="empty-actions">
             <button class="primary-button" id="empty-add-isbn" type="button"><i data-lucide="scan-line"></i><span>ISBNから登録</span></button>
             <button class="secondary-button" id="empty-add-manual" type="button"><i data-lucide="text-search"></i><span>書名・著者から探す</span></button>
+            <button class="secondary-button" id="empty-search-all" type="button" hidden>すべての本から探す</button>
             <button class="text-button" id="empty-clear-search" type="button" hidden>検索をクリア</button>
           </div>
         </div>
@@ -151,7 +130,7 @@
 
         <div class="dashboard-grid">
           <article class="dashboard-panel genre-panel">
-            <div class="panel-heading"><div><span class="section-kicker">COMPOSITION</span><h2>ジャンル構成</h2></div><button class="icon-button compact" type="button" aria-label="ジャンル分析の情報" title="登録ジャンルの構成比"><i data-lucide="info"></i></button></div>
+            <div class="panel-heading"><div><span class="section-kicker">COMPOSITION</span><h2>ジャンル構成</h2></div><span class="panel-note">ジャンルを選んで本棚へ</span></div>
             <div class="donut-layout">
               <div class="donut" id="genre-donut" role="img" aria-label="ジャンル別の割合"><div><strong>6</strong><span>ジャンル</span></div></div>
               <div class="genre-legend" id="genre-legend"></div>
@@ -159,7 +138,7 @@
           </article>
           <article class="dashboard-panel trend-panel">
             <div class="panel-heading"><div><span class="section-kicker">MONTHLY TREND</span><h2>月別の読了冊数</h2></div><span class="signal-up" id="trend-signal"><i data-lucide="minus"></i> 記録なし</span></div>
-            <div class="month-chart" id="month-chart" aria-label="月別の読了冊数"></div>
+            <p class="chart-hint">月を選ぶと、その月に読んだ本を表示します。</p><div class="month-chart-scroll" tabindex="0" role="region" aria-label="月別グラフ。横にスクロールできます"><div class="month-chart" id="month-chart" aria-label="月別の読了冊数"></div></div>
           </article>
           <article class="dashboard-panel rating-panel">
             <div class="panel-heading"><div><span class="section-kicker">RATING</span><h2>評価の分布</h2></div></div>
@@ -211,7 +190,7 @@
             <label class="setting-row"><div><strong>あらすじをメモに追加</strong><span>書誌取得時に自動入力</span></div><input class="switch" type="checkbox" id="synopsis-toggle" checked></label>
           </section>
           <section class="settings-section about-section">
-            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>PWA 1.4.0</span></div></div>
+            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>PWA 1.5.0</span></div></div>
             <p>読書の記憶を、あとから読み解ける記録へ。</p>
             <span class="release-badge">LOCAL FIRST</span>
           </section>
@@ -227,21 +206,34 @@
     </nav>
   </div>
 
-  <dialog class="sheet-dialog" id="add-dialog">
+          <dialog class="library-filter-panel" id="filter-panel" aria-labelledby="filter-title">
+          <div class="filter-panel-heading"><div><span class="section-kicker">FILTER</span><strong id="filter-title">本棚を絞り込む</strong></div><button class="icon-button compact" id="close-filter" type="button" aria-label="絞り込みを閉じる"><i data-lucide="x"></i></button></div>
+          <div class="filter-controls">
+            <label class="field"><span>ジャンル</span><select id="filter-genre"><option value="">すべて</option></select></label>
+            <label class="field"><span>評価</span><select id="filter-rating"><option value="">すべて</option><option value="5">5.0</option><option value="4">4.0</option><option value="3">3.0</option><option value="2">2.0</option><option value="1">1.0</option><option value="0">未評価</option></select></label>
+            <label class="field"><span>読了月</span><input id="filter-month" type="month"><small id="filter-period-hint" hidden></small></label>
+          </div>
+          <div class="filter-action-bar"><button class="text-button" id="clear-criteria" type="button">条件をリセット</button><button class="primary-button" id="apply-filters" type="button">適用</button></div>
+        </dialog>
+
+
+  <dialog class="sheet-dialog" id="add-dialog" aria-labelledby="add-title">
     <div class="dialog-handle" aria-hidden="true"></div>
-    <header class="dialog-header"><div><span class="section-kicker">NEW RECORD</span><h2>本を追加</h2></div><button class="icon-button" data-close="add-dialog" type="button" aria-label="閉じる"><i data-lucide="x"></i></button></header>
+    <header class="dialog-header"><div><span class="section-kicker">NEW RECORD</span><h2 id="add-title" tabindex="-1">本を追加</h2></div><button class="icon-button" data-close="add-dialog" type="button" aria-label="閉じる"><i data-lucide="x"></i></button></header>
+    <div id="add-feedback" class="inline-feedback" role="status" aria-live="polite" hidden></div>
+    <div class="add-scroll">
     <div class="segmented add-modes" role="tablist" aria-label="追加方法">
-      <button class="is-active" data-add-mode="search" role="tab"><i data-lucide="scan-line"></i>ISBN・カメラ</button>
-      <button data-add-mode="manual" role="tab"><i data-lucide="text-search"></i>書名・手入力</button>
+      <button class="is-active" data-add-mode="search" role="tab" aria-selected="true"><i data-lucide="scan-line"></i>バーコード・ISBN</button>
+      <button data-add-mode="manual" role="tab" aria-selected="false"><i data-lucide="text-search"></i>書名検索</button>
     </div>
     <div class="add-view is-active" data-add-view="search">
-      <div class="catalog-controls">
-        <label class="field"><span>ISBN-10 / ISBN-13</span><div class="input-with-icon"><i data-lucide="search"></i><input id="catalog-search" type="search" inputmode="text" autocomplete="off" placeholder="例: 9784873113364" maxlength="30"></div></label>
-        <label class="field catalog-status"><span>登録先</span><select id="catalog-status"><option value="read">読んだ</option><option value="reading">読書中</option><option value="wishlist">読みたい</option></select></label>
-      </div>
       <div class="scan-entry">
-        <button class="secondary-button scan-button" id="start-barcode-scan" type="button"><i data-lucide="camera"></i><span>カメラでバーコードを読む</span></button>
+        <button class="secondary-button scan-button" id="start-barcode-scan" type="button"><i data-lucide="camera"></i><span>バーコードを読む</span></button>
         <p><i data-lucide="shield-check"></i>映像はこの端末内だけで処理され、保存・送信されません。</p>
+      </div>
+      <div class="catalog-controls">
+        <label class="field"><span>ISBN-10 / ISBN-13</span><div class="input-with-icon"><i data-lucide="search"></i><input id="catalog-search" type="search" inputmode="text" enterkeyhint="search" autocomplete="off" placeholder="例: 9784873113364" maxlength="30"></div></label>
+
       </div>
       <section class="barcode-scanner" id="barcode-scanner" aria-label="ISBNバーコード読み取り" hidden>
         <div class="scanner-viewport">
@@ -254,24 +246,24 @@
         </div>
       </section>
       <p class="catalog-source" id="catalog-source">ISBN検索はopenBDを利用します。未収録の場合は手入力で登録できます。</p>
-      <div class="catalog-results" id="catalog-results"></div>
+      <div class="catalog-results" id="catalog-results" aria-live="polite"></div><div class="isbn-fallback"><button class="text-button" id="retry-catalog" type="button" hidden>もう一度検索</button><button class="text-button" id="isbn-enter-directly" type="button">直接入力する</button></div>
     </div>
-    <form class="add-view manual-flow" data-add-view="manual" data-stage="search" id="manual-form">
+    <form class="add-view manual-flow" data-add-view="manual" data-stage="search" id="manual-form" novalidate>
       <section class="manual-search-stage" id="manual-search-stage" aria-labelledby="manual-search-title">
       <div class="manual-step"><span class="is-active">1</span><strong>本を探す</strong><i></i><span>2</span><strong>確認して追加</strong></div>
       <section class="manual-search-card" aria-labelledby="manual-search-title">
         <div class="manual-search-heading">
-          <div><span class="section-kicker">FIND A BOOK</span><h3 id="manual-search-title">書名・著者から入力</h3></div>
-          <span>任意</span>
+          <div><span class="section-kicker">FIND A BOOK</span><h3 id="manual-search-title">書名・著者から探す</h3></div>
+
         </div>
         <div class="manual-search-row">
           <label class="field"><span>タイトル・著者・出版社・ISBN</span><div class="input-with-icon"><i data-lucide="text-search"></i><input id="manual-book-query" type="search" autocomplete="off" placeholder="例: 吾輩は猫である 夏目漱石" maxlength="300"></div></label>
           <button class="secondary-button" id="manual-book-search" type="button"><i data-lucide="search"></i><span>本を検索</span></button>
         </div>
-        <p class="manual-search-source" id="manual-search-source" role="status" aria-live="polite">候補を選ぶと、下の入力欄へ書誌情報を反映します。</p>
+        <p class="manual-search-source" id="manual-search-source" role="status" aria-live="polite">候補を選ぶと、内容を確認して追加できます。</p>
         <div class="manual-search-results" id="manual-search-results"></div>
         <div class="manual-search-actions">
-          <button class="text-button" id="manual-enter-directly" type="button"><i data-lucide="pencil-line"></i>見つからないので直接入力</button>
+          <button class="text-button" id="manual-enter-directly" type="button"><i data-lucide="pencil-line"></i>直接入力する</button>
           <a class="text-link" id="manual-search-ndl" href="https://ndlsearch.ndl.go.jp/" target="_blank" rel="noopener noreferrer" hidden>国立国会図書館サーチでも確認 <i data-lucide="external-link"></i></a>
         </div>
       </section>
@@ -282,8 +274,8 @@
         <button class="text-button manual-back" id="manual-back-to-search" type="button"><i data-lucide="arrow-left"></i>候補に戻る</button>
         <div class="manual-selected-summary" id="manual-selected-summary"></div>
         <div class="manual-quick-fields">
-          <label class="field"><span>本棚</span><select name="status"><option value="read">読んだ</option><option value="reading">読書中</option><option value="wishlist">読みたい</option></select></label>
-          <label class="field"><span>読了日</span><input id="manual-finished-at" name="finishedAt" type="date"></label>
+          <label class="field"><span>本棚</span><select name="status"><option value="read">読了</option><option value="reading">読書中</option><option value="wishlist">読みたい</option></select></label>
+          <label class="field" id="manual-finished-field"><span>読了日</span><input id="manual-finished-at" name="finishedAt" type="date"></label>
           <label class="field"><span>評価</span><select name="rating"><option value="0">未評価</option><option value="5">5 - とても良い</option><option value="4">4 - 良い</option><option value="3">3 - ふつう</option><option value="2">2</option><option value="1">1</option></select></label>
         </div>
         <details class="manual-details" id="manual-details">
@@ -302,10 +294,10 @@
         <div class="manual-action-bar"><button class="primary-button submit-button" type="submit"><i data-lucide="plus"></i>この内容で本棚に追加</button></div>
       </section>
     </form>
+    </div>
   </dialog>
 
-  <dialog class="detail-dialog" id="detail-dialog">
-    <button class="icon-button dialog-close" data-close="detail-dialog" type="button" aria-label="閉じる"><i data-lucide="x"></i></button>
+  <dialog class="detail-dialog" id="detail-dialog" aria-label="本の記録">
     <div id="detail-content"></div>
   </dialog>
 

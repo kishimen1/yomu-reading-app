@@ -21,15 +21,17 @@ import { searchOpenLibraryBooks } from "./book-search";
 import { coverLookupKey, resolveBookCover, shouldLookupBookCover } from "./book-covers";
 import { findGoogleBooksCoverByIsbn } from "./google-books";
 
-type ShelfView = "grid" | "list";
+import { createNavigation } from "./navigation";
+import { isShelfFilter, loadShelfPreferences, saveShelfPreferences, selectShelfBooks, type ShelfFilter, type ShelfView, type ShelfSort, type ShelfCriteria, type ShelfState } from "./shelf-state";
 type ScreenName = "shelf" | "analytics" | "settings";
 type AddMode = "search" | "manual";
 type ManualStage = "search" | "confirm";
 
-interface ShelfCriteria {
-  genre: string;
-  rating: string;
-  finishedPeriod: string;
+interface AppRoute {
+  screen: ScreenName;
+  layer: "none" | "detail" | "edit" | "add" | "confirm" | "filter";
+  bookId?: string;
+  shelf: ShelfState;
 }
 
 interface BeforeInstallPromptEvent extends Event {
@@ -67,10 +69,24 @@ let visibleManualSearchBooks: CatalogBook[] = [];
 let selectedManualCatalogBook: CatalogBook | null = null;
 let books = loadBooks();
 let settings = loadSettings();
-let activeFilter: BookStatus = "read";
-let activeView: ShelfView = "grid";
+const shelfPreferences = loadShelfPreferences();
+let activeFilter: ShelfFilter = shelfPreferences.filter;
+let activeView: ShelfView = shelfPreferences.view;
 let query = "";
 let shelfCriteria: ShelfCriteria = { genre: "", rating: "", finishedPeriod: "" };
+let filterDraft: ShelfCriteria = { ...shelfCriteria };
+let navigation: ReturnType<typeof createNavigation<AppRoute>>;
+let currentRoute: AppRoute;
+let applyingRoute = false;
+let lockedScroll: number | null = null;
+const screenScroll: Record<ScreenName, number> = { shelf: 0, analytics: 0, settings: 0 };
+let detailBaseline = "";
+let addBaseline = "";
+let addReturnMode: AddMode = "search";
+let currentAddMode: AddMode = "search";
+let directEntry = false;
+let detailNotice = "";
+let scannerGeneration = 0;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogRequest: AbortController | null = null;
@@ -112,8 +128,8 @@ function formatDate(dateString: string): string {
   return new Intl.DateTimeFormat("ja-JP", { year: "numeric", month: "short", day: "numeric" }).format(date);
 }
 
-function statusLabel(status: BookStatus): string {
-  return { read: "読了", reading: "読書中", wishlist: "読みたい" }[status];
+function statusLabel(status: ShelfFilter): string {
+  return { all: "すべて", read: "読了", reading: "読書中", wishlist: "読みたい" }[status];
 }
 
 function iconize() {
@@ -121,6 +137,11 @@ function iconize() {
 }
 
 function showToast(message: string) {
+  const feedback = document.querySelector<HTMLElement>("dialog[open] .inline-feedback");
+  if (feedback) {
+    feedback.textContent = message;
+    feedback.hidden = false;
+  }
   const toast = $("#toast");
   $("span", toast).textContent = message;
   toast.classList.add("is-visible");
@@ -160,7 +181,7 @@ function coverSourceMarkup(book: Book): string {
 }
 
 function updateDetailCover(book: Book) {
-  const form = document.querySelector<HTMLFormElement>(`#detail-form[data-book-id="${CSS.escape(book.id)}"]`);
+  const form = document.querySelector<HTMLFormElement>(`#detail-content [data-record-id="${CSS.escape(book.id)}"]`);
   if (!form) return;
   const visual = form.querySelector<HTMLElement>("#detail-cover-visual");
   const source = form.querySelector<HTMLElement>("#detail-cover-source");
@@ -266,7 +287,7 @@ function handleCoverImageError(image: HTMLImageElement) {
   image.hidden = true;
   image.closest(".has-real-cover")?.classList.remove("has-real-cover");
   const bookId = image.dataset.coverBookId;
-  const form = bookId ? document.querySelector<HTMLFormElement>(`#detail-form[data-book-id="${CSS.escape(bookId)}"]`) : null;
+  const form = bookId ? document.querySelector<HTMLFormElement>(`#detail-content [data-record-id="${CSS.escape(bookId)}"]`) : null;
   const source = form?.querySelector<HTMLElement>("#detail-cover-source");
   if (source) source.textContent = "表紙画像を読み込めませんでした";
 }
@@ -328,14 +349,6 @@ function initializeInstallExperience() {
   updateInstallUI();
 }
 
-function matchesFinishedPeriod(book: Book, period: string): boolean {
-  if (!period) return true;
-  if (/^\d{4}$/.test(period)) return book.finishedAt.startsWith(period);
-  if (/^\d{4}-\d{2}$/.test(period)) return book.finishedAt.startsWith(period);
-  const recurringMonth = period.match(/^\*-(\d{2})$/)?.[1];
-  return recurringMonth ? book.finishedAt.slice(5, 7) === recurringMonth : true;
-}
-
 function finishedPeriodLabel(period: string): string {
   if (/^\d{4}$/.test(period)) return `${period}年`;
   if (/^\d{4}-\d{2}$/.test(period)) {
@@ -350,64 +363,80 @@ function shelfCriteriaCount(): number {
   return [shelfCriteria.genre, shelfCriteria.rating, shelfCriteria.finishedPeriod].filter(value => value !== "").length;
 }
 
-function renderShelfFilterControls() {
-  const genreSelect = $<HTMLSelectElement>("#filter-genre");
-  const genres = [...new Set(books.map(book => book.genre).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ja"));
-  genreSelect.innerHTML = `<option value="">すべて</option>${genres.map(genre => `<option value="${escapeHtml(genre)}">${escapeHtml(genre)}</option>`).join("")}`;
-  genreSelect.value = shelfCriteria.genre;
-  $<HTMLSelectElement>("#filter-rating").value = shelfCriteria.rating;
-  $<HTMLInputElement>("#filter-month").value = /^\d{4}-\d{2}$/.test(shelfCriteria.finishedPeriod) ? shelfCriteria.finishedPeriod : "";
+function getShelfState(): ShelfState {
+  return { filter: activeFilter, view: activeView, sort: $<HTMLSelectElement>("#sort-books").value as ShelfSort, query, criteria: { ...shelfCriteria } };
+}
 
+function renderShelfFilterControls() {
   const chips: Array<{ key: string; label: string }> = [];
   if (query.trim()) chips.push({ key: "query", label: `検索: ${query.trim()}` });
   if (shelfCriteria.genre) chips.push({ key: "genre", label: shelfCriteria.genre });
-  if (shelfCriteria.rating !== "") chips.push({ key: "rating", label: shelfCriteria.rating === "0" ? "未評価" : `評価 ${shelfCriteria.rating}.0` });
+  if (shelfCriteria.rating !== "") chips.push({ key: "rating", label: shelfCriteria.rating === "0" ? "未評価" : `評価 ${shelfCriteria.rating}` });
   if (shelfCriteria.finishedPeriod) chips.push({ key: "finishedPeriod", label: finishedPeriodLabel(shelfCriteria.finishedPeriod) });
   $("#active-filter-chips").innerHTML = chips.map(chip => `<button type="button" data-clear-shelf-filter="${chip.key}" aria-label="${escapeHtml(chip.label)}の条件を解除"><span>${escapeHtml(chip.label)}</span><i data-lucide="x"></i></button>`).join("");
   $("#active-filter-bar").hidden = chips.length === 0;
-
   const count = shelfCriteriaCount();
-  const badge = $("#filter-count");
-  badge.textContent = String(count);
-  badge.hidden = count === 0;
+  $("#filter-count").textContent = String(count);
+  $("#filter-count").hidden = count === 0;
   iconize();
 }
 
-function renderBooks() {
-  const sort = $<HTMLSelectElement>("#sort-books").value;
-  const normalizedTerms = query.toLocaleLowerCase("ja").trim().split(/\s+/).filter(Boolean);
-  const filtered = books
-    .filter(book => book.status === activeFilter)
-    .filter(book => normalizedTerms.every(term => `${book.title} ${book.author} ${book.isbn} ${book.genre}`.toLocaleLowerCase("ja").includes(term)))
-    .filter(book => !shelfCriteria.genre || book.genre === shelfCriteria.genre)
-    .filter(book => shelfCriteria.rating === "" || book.rating === Number(shelfCriteria.rating))
-    .filter(book => matchesFinishedPeriod(book, shelfCriteria.finishedPeriod))
-    .sort((a, b) => {
-      if (sort === "date-asc") return (a.finishedAt || a.createdAt).localeCompare(b.finishedAt || b.createdAt);
-      if (sort === "rating-desc") return b.rating - a.rating;
-      if (sort === "title-asc") return a.title.localeCompare(b.title, "ja");
-      return (b.finishedAt || b.createdAt).localeCompare(a.finishedAt || a.createdAt);
-    });
+function renderFilterDraft() {
+  const genres = [...new Set(books.map(book => book.genre).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ja"));
+  $<HTMLSelectElement>("#filter-genre").innerHTML = `<option value="">すべて</option>${genres.map(genre => `<option value="${escapeHtml(genre)}">${escapeHtml(genre)}</option>`).join("")}`;
+  $<HTMLSelectElement>("#filter-genre").value = filterDraft.genre;
+  $<HTMLSelectElement>("#filter-rating").value = filterDraft.rating;
+  $<HTMLInputElement>("#filter-month").value = /^\d{4}-\d{2}$/.test(filterDraft.finishedPeriod) ? filterDraft.finishedPeriod : "";
+  const periodHint = $("#filter-period-hint");
+  periodHint.hidden = !filterDraft.finishedPeriod || /^\d{4}-\d{2}$/.test(filterDraft.finishedPeriod);
+  periodHint.textContent = periodHint.hidden ? "" : `現在の条件: ${finishedPeriodLabel(filterDraft.finishedPeriod)}。月を選ぶと変更できます。`;
+  const count = selectShelfBooks(books, { ...getShelfState(), criteria: filterDraft }).length;
+  $("#apply-filters").textContent = `${count}冊を表示`;
+}
 
+function renderBooks() {
+  const state = getShelfState();
+  const filtered = selectShelfBooks(books, state);
+  saveShelfPreferences({ filter: activeFilter, view: activeView, sort: state.sort });
+  if (navigation && !applyingRoute && currentRoute.screen === "shelf") {
+    currentRoute = { ...currentRoute, shelf: state };
+    navigation.update(currentRoute);
+  }
+  $$(".shelf-tab").forEach(tab => {
+    const selected = tab.dataset.filter === activeFilter;
+    tab.classList.toggle("is-active", selected);
+    tab.setAttribute("aria-selected", String(selected));
+    tab.setAttribute("tabindex", selected ? "0" : "-1");
+  });
+  $$("[data-view]").forEach(button => {
+    button.classList.toggle("is-active", button.dataset.view === activeView);
+    button.setAttribute("aria-pressed", String(button.dataset.view === activeView));
+  });
   const grid = $("#book-grid");
   grid.classList.toggle("is-list", activeView === "list");
-  grid.innerHTML = filtered.map((book, index) => `
-    <article class="book-card" style="animation-delay:${Math.min(index * 35, 210)}ms">
-      <button class="book-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" type="button" data-book-id="${escapeHtml(book.id)}" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}" aria-label="${escapeHtml(book.title)}の詳細を開く">
-        ${coverImageMarkup(book, true)}
-        <span class="cover-copy"><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)}</small></span>
+  grid.innerHTML = filtered.map(book => `
+    <article class="book-card">
+      <button class="book-card-button" type="button" data-book-id="${escapeHtml(book.id)}" aria-label="${escapeHtml(book.title)}の詳細を開く">
+        <span class="book-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">
+          ${coverImageMarkup(book, true)}
+          <span class="cover-copy"><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)}</small></span>
+        </span>
+        <span class="book-meta">
+          <span class="book-title">${escapeHtml(book.title)}</span><span class="book-author">${escapeHtml(book.author)}</span>
+          <span class="book-meta-footer"><span class="rating" aria-label="${book.rating ? `評価${book.rating}` : "未評価"}">${book.rating ? `★ ${book.rating}` : "未評価"}</span><span class="status-badge">${statusLabel(book.status)}</span></span>
+          ${book.status === "read" ? `<span class="book-date">${formatDate(book.finishedAt)}</span>` : ""}
+          ${book.review.trim() ? `<span class="book-excerpt">${escapeHtml(book.review)}</span>` : ""}
+        </span>
       </button>
-      <div class="book-meta">
-        <div><h3>${escapeHtml(book.title)}</h3><p>${escapeHtml(book.author)}</p><span class="status-badge">${statusLabel(book.status)}</span></div>
-        <div class="book-meta-footer"><span>${book.status === "read" ? formatDate(book.finishedAt) : escapeHtml(book.genre)}</span><span class="rating">${book.rating ? `★ ${book.rating}.0` : "未評価"}</span></div>
-      </div>
     </article>`).join("");
-
-  renderEmptyState(filtered.length);
   grid.hidden = filtered.length === 0;
+  $("#all-count").textContent = String(books.length);
   $("#read-count").textContent = String(books.filter(book => book.status === "read").length);
   $("#reading-count").textContent = String(books.filter(book => book.status === "reading").length);
   $("#wishlist-count").textContent = String(books.filter(book => book.status === "wishlist").length);
+  $("#shelf-result-count").textContent = `${filtered.length}冊`;
+  $("#shelf-pulse").hidden = books.length === 0;
+  renderEmptyState(filtered.length);
   renderShelfFilterControls();
 }
 
@@ -415,29 +444,15 @@ function renderEmptyState(resultCount: number) {
   const empty = $("#empty-state");
   empty.hidden = resultCount > 0;
   if (resultCount > 0) return;
-
   const hasQuery = query.trim().length > 0 || shelfCriteriaCount() > 0;
-  const isFirstBook = books.length === 0;
-  const title = $("#empty-title");
-  const copy = $("#empty-copy");
-  const clearButton = $("#empty-clear-search");
-  clearButton.hidden = !hasQuery;
-
-  if (isFirstBook) {
-    empty.classList.add("is-first-book");
-    title.textContent = "最初の一冊から、あなたの本棚へ";
-    copy.textContent = "バーコードをカメラで読むか、書名・著者から探して読書記録を始められます。記録はこの端末だけに保存されます。";
-    return;
-  }
-
-  empty.classList.remove("is-first-book");
-  if (hasQuery) {
-    title.textContent = "検索結果がありません";
-    copy.textContent = "検索語を変えるか、条件をクリアしてください。";
-    return;
-  }
-  title.textContent = `${statusLabel(activeFilter)}の本はまだありません`;
-  copy.textContent = "別の本棚へ切り替えるか、新しい本を追加してください。";
+  const first = books.length === 0;
+  empty.classList.toggle("is-first-book", first);
+  $("#empty-clear-search").hidden = !hasQuery;
+  $("#empty-search-all").hidden = first || !hasQuery || (activeFilter === "all" && shelfCriteriaCount() === 0);
+  $("#empty-add-isbn").hidden = !first && hasQuery;
+  $("#empty-add-manual").hidden = !first && hasQuery;
+  $("#empty-title").textContent = first ? "最初の一冊から、あなたの本棚へ" : hasQuery ? "条件に合う本がありません" : `${statusLabel(activeFilter)}の本はまだありません`;
+  $("#empty-copy").textContent = first ? "バーコードや書名から、本を追加できます。記録はこの端末に保存されます。" : hasQuery ? "検索する言葉を変えるか、絞り込みを解除してみてください。" : "別の本棚へ切り替えるか、新しい本を追加してください。";
 }
 
 function syncAnalyticsYearOptions() {
@@ -455,30 +470,8 @@ function syncAnalyticsYearOptions() {
 }
 
 function renderReadingPulse(allReadBooks: Book[], now: Date) {
-  const points = Array.from({ length: 6 }, (_, index) => {
-    const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
-    const year = date.getFullYear();
-    const month = date.getMonth() + 1;
-    const count = allReadBooks.filter(book => Number(book.finishedAt.slice(0, 4)) === year && Number(book.finishedAt.slice(5, 7)) === month).length;
-    return { year, month, count };
-  });
-  const max = Math.max(...points.map(point => point.count), 1);
-  $$(".mini-bars > span").forEach((bar, index) => {
-    const point = points[index];
-    if (!point) return;
-    bar.setAttribute("style", `--bar:${Math.max(point.count / max * 88, point.count ? 20 : 4)}%`);
-    bar.classList.toggle("current", index === points.length - 1);
-    $("small", bar).textContent = `${point.month}月`;
-    bar.setAttribute("title", `${point.year}年${point.month}月 ${point.count}冊`);
-  });
-  const current = points.at(-1)?.count ?? 0;
-  const previous = points.at(-2)?.count ?? 0;
-  $("#month-count").textContent = `${current}冊`;
-  $("#pace-copy").textContent = allReadBooks.length === 0
-    ? "最初の読了記録を追加してみましょう。"
-    : current === previous
-    ? "先月と同じペースです。"
-    : `先月より${Math.abs(current - previous)}冊${current > previous ? "多い" : "少ない"}ペースです。`;
+  const month = todayIso(now).slice(0, 7);
+  $("#month-count").textContent = `${allReadBooks.filter(book => book.finishedAt.startsWith(month)).length}冊`;
 }
 
 function renderAnalytics() {
@@ -599,20 +592,141 @@ function renderAll() {
   iconize();
 }
 
-function navigate(screen: ScreenName) {
-  $$(".screen").forEach(section => section.classList.toggle("is-active", section.id === `screen-${screen}`));
-  $$('[data-nav]').forEach(button => button.classList.toggle("is-active", button.dataset.nav === screen));
-  window.scrollTo({ top: 0, behavior: "smooth" });
+function formSignature(form: HTMLFormElement): string {
+  return JSON.stringify([...new FormData(form).entries()]) + (form.dataset.rating || "");
 }
 
-function setFilter(filter: BookStatus) {
-  activeFilter = filter;
-  if (filter !== "read" && shelfCriteria.finishedPeriod) shelfCriteria.finishedPeriod = "";
-  $$(".shelf-tab").forEach(tab => {
-    const isActive = tab.dataset.filter === filter;
-    tab.classList.toggle("is-active", isActive);
-    tab.setAttribute("aria-selected", String(isActive));
+function canLeaveRoute(from: AppRoute, to: AppRoute): boolean {
+  if (from.layer === "edit" && (to.layer !== "edit" || to.bookId !== from.bookId)) {
+    const form = document.querySelector<HTMLFormElement>("#detail-form");
+    if (form && formSignature(form) !== detailBaseline && !window.confirm("保存していない変更があります。変更を破棄して戻りますか？")) return false;
+  }
+  if (["add", "confirm"].includes(from.layer) && !["add", "confirm"].includes(to.layer)) {
+    const form = $<HTMLFormElement>("#manual-form");
+    if (addBaseline && formSignature(form) !== addBaseline && !window.confirm("追加していない入力があります。入力を破棄して閉じますか？")) return false;
+  }
+  return true;
+}
+
+function syncBodyLock(locked: boolean) {
+  if (locked && lockedScroll === null) {
+    lockedScroll = window.scrollY;
+    document.body.style.top = `-${lockedScroll}px`;
+    document.body.classList.add("has-dialog");
+  } else if (!locked && lockedScroll !== null) {
+    const top = lockedScroll;
+    lockedScroll = null;
+    document.body.classList.remove("has-dialog");
+    document.body.style.top = "";
+    window.scrollTo({ top, behavior: "instant" });
+  }
+}
+
+function stopAddRequests() {
+  stopBarcodeScanner();
+  if (catalogSearchTimer !== null) clearTimeout(catalogSearchTimer);
+  catalogSearchTimer = null;
+  catalogRequest?.abort();
+  manualSearchRequest?.abort();
+  catalogRequest = null;
+  manualSearchRequest = null;
+}
+
+function resetAddSession() {
+  stopAddRequests();
+  const form = $<HTMLFormElement>("#manual-form");
+  form.reset();
+  $<HTMLInputElement>('[name="isbn"]', form).setCustomValidity("");
+  selectedManualCatalogBook = null;
+  visibleManualSearchBooks = [];
+  visibleCatalogBooks = [];
+  directEntry = false;
+  $<HTMLInputElement>("#catalog-search").value = "";
+  $<HTMLInputElement>("#manual-book-query").value = "";
+  $<HTMLSelectElement>('[name="status"]', form).value = activeFilter === "all" ? "read" : activeFilter;
+  syncManualFinishedAt();
+  addBaseline = formSignature(form);
+  $("#add-feedback").hidden = true;
+  $("#retry-catalog").hidden = true;
+  renderCatalogResults([], "ISBNを入力して検索できます。");
+  renderManualSearchResults([]);
+  updateNdlSearchLink("");
+  $("#manual-search-source").textContent = "候補を選ぶと、内容を確認して追加できます。";
+  $("#catalog-source").textContent = "本の裏表紙にある978・979から始まるバーコードを読み取ります。";
+}
+
+let addSearchScroll = 0;
+const detailScroll = new Map<string, number>();
+
+function applyRoute(next: AppRoute) {
+  const previous = currentRoute;
+  screenScroll[previous.screen] = lockedScroll ?? window.scrollY;
+  if (previous.layer === "detail" && previous.bookId) detailScroll.set(previous.bookId, document.querySelector(".record-scroll")?.scrollTop || 0);
+  if (previous.layer === "add" && next.layer === "confirm") addSearchScroll = $(".add-scroll").scrollTop;
+  if (["add", "confirm"].includes(previous.layer) && !["add", "confirm"].includes(next.layer)) stopAddRequests();
+  currentRoute = next;
+  applyingRoute = true;
+  activeFilter = next.shelf.filter;
+  activeView = next.shelf.view;
+  query = next.shelf.query;
+  shelfCriteria = { ...next.shelf.criteria };
+  $<HTMLSelectElement>("#sort-books").value = next.shelf.sort;
+  $<HTMLInputElement>("#library-search").value = query;
+  $$(".screen").forEach(screen => screen.classList.toggle("is-active", screen.id === `screen-${next.screen}`));
+  $$("[data-nav]").forEach(button => {
+    button.classList.toggle("is-active", button.dataset.nav === next.screen);
+    if (button.classList.contains("nav-item")) button.setAttribute("aria-current", button.dataset.nav === next.screen ? "page" : "false");
   });
+  renderAll();
+  const dialogId = next.layer === "filter" ? "filter-panel" : ["detail", "edit"].includes(next.layer) ? "detail-dialog" : ["add", "confirm"].includes(next.layer) ? "add-dialog" : "";
+  $$<HTMLDialogElement>("dialog[open]").forEach(dialog => { if (dialog.id !== dialogId) dialog.close(); });
+  if (dialogId !== "detail-dialog") $("#detail-content").replaceChildren();
+  syncBodyLock(Boolean(dialogId));
+  if (next.layer === "detail" || next.layer === "edit") {
+    renderBookDetail(next.bookId || "", next.layer === "edit");
+  } else if (next.layer === "filter") {
+    filterDraft = { ...shelfCriteria };
+    renderFilterDraft();
+  } else if (next.layer === "add" || next.layer === "confirm") {
+    if (!["add", "confirm"].includes(previous.layer)) resetAddSession();
+    setAddMode(next.layer === "confirm" ? "manual" : addReturnMode);
+    $<HTMLFormElement>("#manual-form").dataset.stage = next.layer === "confirm" ? "confirm" : "search";
+    $(".add-modes").hidden = next.layer === "confirm";
+    if (next.layer === "confirm") renderManualSelectedSummary(directEntry ? null : selectedManualCatalogBook);
+  }
+  $("#filter-toggle").setAttribute("aria-expanded", String(next.layer === "filter"));
+  if (dialogId) {
+    const dialog = $<HTMLDialogElement>(`#${dialogId}`);
+    if (!dialog.open) dialog.showModal();
+    if (next.layer === "add" || next.layer === "confirm") {
+      $("#add-title").focus({ preventScroll: true });
+      $(".add-scroll").scrollTo({ top: next.layer === "confirm" ? 0 : addSearchScroll, behavior: "instant" });
+    } else if (next.layer === "detail") {
+      $(".record-scroll").scrollTop = detailScroll.get(next.bookId || "") || 0;
+      $("#record-heading").focus({ preventScroll: true });
+    } else if (next.layer === "edit") {
+      $("#record-heading").focus({ preventScroll: true });
+    }
+  } else {
+    window.scrollTo({ top: screenScroll[next.screen], behavior: "instant" });
+    if (previous.bookId) document.querySelector<HTMLElement>(`[data-book-id="${CSS.escape(previous.bookId)}"]`)?.focus({ preventScroll: true });
+  }
+  applyingRoute = false;
+  iconize();
+}
+
+function routeTo(layer: AppRoute["layer"], bookId?: string) {
+  navigation.push({ screen: currentRoute.screen, layer, bookId, shelf: getShelfState() });
+}
+
+function navigate(screen: ScreenName) {
+  if (screen === currentRoute.screen && currentRoute.layer === "none") return;
+  navigation.push({ screen, layer: "none", shelf: getShelfState() });
+}
+
+function setFilter(filter: ShelfFilter) {
+  activeFilter = filter;
+  if (filter !== "read" && filter !== "all") shelfCriteria.finishedPeriod = "";
   renderBooks();
 }
 
@@ -624,51 +738,35 @@ function clearAllShelfFilters() {
   query = "";
   resetShelfCriteria();
   $<HTMLInputElement>("#library-search").value = "";
-  $("#search-panel").hidden = true;
-  $("#filter-panel").hidden = true;
-  $("#filter-toggle").setAttribute("aria-expanded", "false");
   renderBooks();
 }
 
 function applyAnalyticsShelfFilter(criteria: Partial<ShelfCriteria>) {
-  query = "";
-  shelfCriteria = { genre: "", rating: "", finishedPeriod: "", ...criteria };
-  $<HTMLInputElement>("#library-search").value = "";
-  $("#search-panel").hidden = true;
-  $("#filter-panel").hidden = true;
-  $("#filter-toggle").setAttribute("aria-expanded", "false");
-  navigate("shelf");
-  setFilter("read");
+  const shelf: ShelfState = { ...getShelfState(), filter: "read", query: "", criteria: { genre: "", rating: "", finishedPeriod: "", ...criteria } };
+  screenScroll.shelf = 0;
+  navigation.push({ screen: "shelf", layer: "none", shelf });
 }
 
 function openAddDialog(mode: AddMode = "search") {
-  setAddMode(mode);
-  $<HTMLDialogElement>("#add-dialog").showModal();
-  if (mode === "search") window.setTimeout(() => $<HTMLInputElement>("#catalog-search").focus(), 50);
-  if (mode === "manual") window.setTimeout(() => $<HTMLInputElement>("#manual-book-query").focus(), 50);
+  addReturnMode = mode;
+  addSearchScroll = 0;
+  routeTo("add");
 }
 
 function closeDialog(id: string) {
-  const dialog = document.getElementById(id) as HTMLDialogElement | null;
-  if (id === "add-dialog") {
-    stopBarcodeScanner();
-    catalogRequest?.abort();
-    catalogRequest = null;
-    manualSearchRequest?.abort();
-    manualSearchRequest = null;
-  }
-  if (dialog?.open) dialog.close();
+  if (id === "filter-panel") navigation.back();
+  else navigation.returnTo(route => route.layer === "none");
 }
 
 function setAddMode(mode: AddMode) {
   if (mode !== "search") stopBarcodeScanner();
-  $$('[data-add-mode]').forEach(button => button.classList.toggle("is-active", button.dataset.addMode === mode));
+  currentAddMode = mode;
+  $$('[data-add-mode]').forEach(button => {
+    button.classList.toggle("is-active", button.dataset.addMode === mode);
+    button.setAttribute("aria-selected", String(button.dataset.addMode === mode));
+  });
   $$('[data-add-view]').forEach(view => view.classList.toggle("is-active", view.dataset.addView === mode));
-  if (mode === "search" && !$<HTMLInputElement>("#catalog-search").value) {
-    visibleCatalogBooks = [];
-    renderCatalogResults([], "ISBNを入力すると、openBDから書誌情報を取得します。");
-  }
-  if (mode === "manual") setManualStage("search");
+  if (currentRoute?.layer === "add") addReturnMode = mode;
 }
 
 function renderManualSelectedSummary(book: CatalogBook | null) {
@@ -683,43 +781,33 @@ function renderManualSelectedSummary(book: CatalogBook | null) {
   iconize();
 }
 
-function setManualStage(stage: ManualStage, directEntry = false) {
-  const form = $<HTMLFormElement>("#manual-form");
-  form.dataset.stage = stage;
-  if (stage === "search") {
-    window.setTimeout(() => $<HTMLInputElement>("#manual-book-query").focus(), 50);
-  } else {
-    renderManualSelectedSummary(directEntry ? null : selectedManualCatalogBook);
-    const details = $<HTMLDetailsElement>("#manual-details");
-    details.open = directEntry;
-    $<HTMLDialogElement>("#add-dialog").scrollTo({ top: 0, behavior: "smooth" });
-    if (directEntry) window.setTimeout(() => $<HTMLInputElement>('#manual-form [name="title"]').focus(), 80);
-  }
-  iconize();
+function setManualStage(stage: ManualStage, isDirect = false) {
+  if (stage === "search") { navigation.back(); return; }
+  directEntry = isDirect;
+  $<HTMLDetailsElement>("#manual-details").open = isDirect;
+  routeTo("confirm");
 }
 
 function prepareDirectManualEntry() {
-  selectedManualCatalogBook = null;
   const form = $<HTMLFormElement>("#manual-form");
-  ["title", "author", "publisher", "isbn", "pages", "notes", "review"].forEach(name => {
-    const input = form.elements.namedItem(name);
-    if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) input.value = "";
-  });
-  $<HTMLInputElement>('[name="genre"]', form).value = "その他";
-  $<HTMLSelectElement>('[name="status"]', form).value = "read";
-  $<HTMLSelectElement>('[name="rating"]', form).value = "0";
-  $<HTMLInputElement>("#manual-finished-at").value = todayIso();
+  if (addBaseline && formSignature(form) !== addBaseline && !window.confirm("入力済みの内容を破棄して、別の本を直接入力しますか？")) return;
+  selectedManualCatalogBook = null;
+  const status = activeFilter === "all" ? "read" : activeFilter;
+  form.reset();
+  $<HTMLSelectElement>('[name="status"]', form).value = status;
+  const isbn = $<HTMLInputElement>("#catalog-search").value;
+  $<HTMLInputElement>('[name="isbn"]', form).value = currentAddMode === "search" && isValidIsbn(isbn) ? normalizeIsbn(isbn) : "";
   syncManualFinishedAt();
+  addBaseline = formSignature(form);
   setManualStage("confirm", true);
 }
 
-function renderCatalogResults(results: CatalogBook[], emptyMessage = "書誌情報が見つかりませんでした。手入力で登録できます。") {
+function renderCatalogResults(results: CatalogBook[], emptyMessage = "書誌情報が見つかりませんでした。直接入力で登録できます。") {
   $("#catalog-results").innerHTML = results.map(book => `
-    <article class="catalog-result">
-      <div class="result-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" style="--cover-position:${COVER_POSITIONS[book.cover]}">${catalogCoverImageMarkup(book)}</div>
-      <span><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)}${book.publisher ? ` · ${escapeHtml(book.publisher)}` : ""}<br>ISBN ${escapeHtml(book.isbn)}</small></span>
-      <button type="button" data-catalog-isbn="${book.isbn}" aria-label="${escapeHtml(book.title)}を追加"><i data-lucide="plus"></i></button>
-    </article>`).join("") || `<p class="catalog-empty">${escapeHtml(emptyMessage)}</p>`;
+    <button class="catalog-result candidate-button" type="button" data-catalog-isbn="${escapeHtml(book.isbn)}" aria-label="${escapeHtml(book.title)}を確認して追加">
+      <span class="result-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">${catalogCoverImageMarkup(book)}</span>
+      <span><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)}${book.publisher ? ` · ${escapeHtml(book.publisher)}` : ""}<br>ISBN ${escapeHtml(book.isbn)}</small><span class="candidate-action">内容を確認 <i data-lucide="arrow-right"></i></span></span>
+    </button>`).join("") || `<p class="catalog-empty">${escapeHtml(emptyMessage)}</p>`;
   iconize();
 }
 
@@ -727,46 +815,41 @@ async function searchCatalog(searchTerm: string) {
   const term = searchTerm.trim();
   catalogRequest?.abort();
   catalogRequest = null;
-
+  visibleCatalogBooks = [];
+  $("#retry-catalog").hidden = true;
   if (!isValidIsbn(term)) {
-    visibleCatalogBooks = [];
-    renderCatalogResults([], term ? "ISBN-10またはISBN-13の数字を確認してください。" : "ISBNを入力すると、openBDから書誌情報を取得します。");
-    $("#catalog-source").textContent = term
-      ? "ハイフンは入っていても構いません。ISBNのチェック数字まで入力してください。"
-      : "ISBN検索はopenBDを利用します。未収録の場合は手入力で登録できます。";
+    renderCatalogResults([], term ? "ISBNを最後まで入力してください。ISBN-10の末尾のXも使えます。" : "ISBNを入力して検索できます。");
+    $("#catalog-source").textContent = "ハイフンが入っていても検索できます。";
     return;
   }
-
   const request = new AbortController();
   catalogRequest = request;
-  $("#catalog-source").textContent = "openBDから書誌情報を取得し、実在書影を探しています…";
-  $("#catalog-results").innerHTML = `<p class="catalog-empty">書誌情報と書影を検索中です。</p>`;
-
+  $("#catalog-source").textContent = "本を検索しています…";
+  renderCatalogResults([], "書誌情報を検索中です。");
   try {
     const result = await fetchOpenBdBook(term, request.signal);
     if (request.signal.aborted) return;
+    visibleCatalogBooks = [result];
+    renderCatalogResults(visibleCatalogBooks);
+    $("#catalog-source").textContent = result.coverUrl ? "本を選んで、内容を確認してください。" : "本が見つかりました。表紙を確認しています…";
     if (!result.coverUrl) {
       try {
         const coverResult = await resolveBookCover(result, { signal: request.signal, openBdCover: null });
+        if (request.signal.aborted) return;
         if (coverResult.coverUrl) {
           result.coverUrl = coverResult.coverUrl;
           result.coverSource = coverResult.coverSource;
         }
-      } catch {
-        if (request.signal.aborted) return;
-        // 書影だけ取得できない場合も、openBDの書誌情報は登録候補として表示する。
-      }
+      } catch { if (request.signal.aborted) return; }
+      renderCatalogResults(visibleCatalogBooks);
+      if (selectedManualCatalogBook === result && currentRoute.layer === "confirm") renderManualSelectedSummary(result);
     }
-    visibleCatalogBooks = [result];
-    renderCatalogResults(visibleCatalogBooks);
-    $("#catalog-source").textContent = result.coverUrl
-      ? "openBDの書誌情報と、書影サービスから取得した実在表紙です。"
-      : "openBDの書誌情報です。一致する書影がない場合は代替表紙を表示します。";
+    $("#catalog-source").textContent = result.coverUrl ? "本を選んで、内容を確認してください。" : "表紙は見つかりませんでしたが、この本を登録できます。";
   } catch (error) {
     if (request.signal.aborted) return;
-    visibleCatalogBooks = [];
-    renderCatalogResults([], "書誌情報を取得できませんでした。手入力で登録できます。");
-    $("#catalog-source").textContent = error instanceof Error ? error.message : "openBDの書誌情報を取得できませんでした。";
+    renderCatalogResults([], "本の情報を取得できませんでした。再検索や直接入力をお試しください。");
+    $("#catalog-source").textContent = error instanceof Error ? error.message : "書誌検索に接続できませんでした。";
+    $("#retry-catalog").hidden = false;
   } finally {
     if (catalogRequest === request) catalogRequest = null;
   }
@@ -777,16 +860,12 @@ function scheduleCatalogSearch(searchTerm: string) {
   catalogSearchTimer = setTimeout(() => searchCatalog(searchTerm), 350);
 }
 
-function renderManualSearchResults(results: CatalogBook[], emptyMessage = "タイトルや著者を入力して検索してください。", selectedIndex = -1) {
-  $("#manual-search-results").innerHTML = results.map((book, index) => {
-    const metadata = [book.publisher, book.pages ? `${book.pages.toLocaleString("ja-JP")}ページ` : "", book.isbn ? `ISBN ${book.isbn}` : "ISBNなし"].filter(Boolean).join(" · ");
-    return `
-      <article class="manual-search-result ${index === selectedIndex ? "is-selected" : ""}">
-        <div class="result-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">${catalogCoverImageMarkup(book)}</div>
-        <span><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)}<br>${escapeHtml(metadata)}</small></span>
-        <button type="button" data-manual-result-index="${index}" aria-label="${escapeHtml(book.title)}を入力欄に反映">${index === selectedIndex ? '<i data-lucide="check"></i><span>選択済み</span>' : '<i data-lucide="arrow-down-to-line"></i><span>選択</span>'}</button>
-      </article>`;
-  }).join("") || `<p class="catalog-empty">${escapeHtml(emptyMessage)}</p>`;
+function renderManualSearchResults(results: CatalogBook[], emptyMessage = "書名や著者を入力して検索してください。", selectedIndex = -1) {
+  $("#manual-search-results").innerHTML = results.map((book, index) => `
+    <button class="manual-search-result candidate-button${index === selectedIndex ? " is-selected" : ""}" type="button" data-manual-result-index="${index}" aria-label="${escapeHtml(book.title)}を入力欄に反映">
+      <span class="result-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">${catalogCoverImageMarkup(book)}</span>
+      <span><strong>${escapeHtml(book.title)}</strong><small>${escapeHtml(book.author)}${book.publisher ? `<br>${escapeHtml(book.publisher)}` : ""}${book.isbn ? `<br>ISBN ${escapeHtml(book.isbn)}` : ""}</small><span class="candidate-action">内容を確認 <i data-lucide="arrow-right"></i></span></span>
+    </button>`).join("") || `<p class="catalog-empty">${escapeHtml(emptyMessage)}</p>`;
   iconize();
 }
 
@@ -801,6 +880,7 @@ async function hydrateManualSearchCovers(results: CatalogBook[], request: AbortC
   if (request.signal.aborted || manualSearchRequest !== request) return;
   const selectedIndex = selectedManualCatalogBook ? results.indexOf(selectedManualCatalogBook) : -1;
   renderManualSearchResults(results, undefined, selectedIndex);
+  if (selectedManualCatalogBook && currentRoute.layer === "confirm") renderManualSelectedSummary(selectedManualCatalogBook);
 }
 
 function updateNdlSearchLink(searchTerm: string) {
@@ -858,31 +938,41 @@ async function searchManualBooks(searchTerm: string) {
   }
 }
 
+function selectCatalogBook(book: CatalogBook) {
+  const form = $<HTMLFormElement>("#manual-form");
+  const same = selectedManualCatalogBook === book;
+  if (!same && addBaseline && formSignature(form) !== addBaseline && !window.confirm("入力済みの内容を破棄して、この本を選びますか？")) return;
+  if (!same) {
+    const status = activeFilter === "all" ? "read" : activeFilter;
+    form.reset();
+    $<HTMLSelectElement>('[name="status"]', form).value = status;
+    for (const name of ["title", "author", "publisher", "isbn", "genre", "pages"] as const) {
+      const input = $<HTMLInputElement>(`[name="${name}"]`, form);
+      input.value = String(book[name] || (name === "genre" ? "その他" : ""));
+      input.setCustomValidity("");
+    }
+    syncManualFinishedAt();
+    addBaseline = formSignature(form);
+  }
+  selectedManualCatalogBook = book;
+  setManualStage("confirm");
+}
+
 function selectManualSearchBook(index: number) {
   const book = visibleManualSearchBooks[index];
-  if (!book) return;
-  selectedManualCatalogBook = book;
-  const form = $<HTMLFormElement>("#manual-form");
-  $<HTMLInputElement>('[name="title"]', form).value = book.title;
-  $<HTMLInputElement>('[name="author"]', form).value = book.author;
-  $<HTMLInputElement>('[name="publisher"]', form).value = book.publisher || "";
-  $<HTMLInputElement>('[name="isbn"]', form).value = book.isbn;
-  $<HTMLInputElement>('[name="genre"]', form).value = book.genre || "その他";
-  $<HTMLInputElement>('[name="pages"]', form).value = book.pages ? String(book.pages) : "";
-  renderManualSearchResults(visibleManualSearchBooks, undefined, index);
-  syncManualFinishedAt();
-  setManualStage("confirm");
-  showToast("候補を選びました。内容を確認してください");
+  if (book) selectCatalogBook(book);
 }
 
 function syncManualFinishedAt() {
   const status = $<HTMLSelectElement>('#manual-form [name="status"]').value;
   const finishedAt = $<HTMLInputElement>("#manual-finished-at");
   finishedAt.disabled = status !== "read";
+  $("#manual-finished-field").hidden = status !== "read";
   if (status === "read" && !finishedAt.value) finishedAt.value = todayIso();
 }
 
 function stopBarcodeScanner() {
+  scannerGeneration += 1;
   if (scannerTimer !== null) {
     clearInterval(scannerTimer);
     scannerTimer = null;
@@ -906,6 +996,7 @@ function cameraErrorMessage(error: unknown): string {
 
 async function startBarcodeScanner() {
   stopBarcodeScanner();
+  const generation = scannerGeneration;
   const button = $<HTMLButtonElement>("#start-barcode-scan");
   const scanner = $("#barcode-scanner");
   const status = $("#barcode-status");
@@ -918,12 +1009,18 @@ async function startBarcodeScanner() {
 
     scanner.hidden = false;
     status.textContent = "カメラを起動しています…";
-    scannerStream = await navigator.mediaDevices.getUserMedia({
+    const stream = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
     });
-    video.srcObject = scannerStream;
+    if (generation !== scannerGeneration || currentRoute.layer !== "add" || currentAddMode !== "search") {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
+    scannerStream = stream;
+    video.srcObject = stream;
     await video.play();
+    if (generation !== scannerGeneration) return;
     status.textContent = "本の裏表紙にあるISBNバーコードを枠に合わせてください。";
 
     const detector = new window.BarcodeDetector({ formats: ["ean_13"] });
@@ -931,6 +1028,7 @@ async function startBarcodeScanner() {
       if (scannerDetectionBusy) return;
       scannerDetectionBusy = true;
       void detector.detect(video).then(codes => {
+        if (generation !== scannerGeneration) return;
         const isbn = codes.map(code => normalizeIsbn(code.rawValue)).find(value => value.length === 13 && /^(978|979)/.test(value) && isValidIsbn(value));
         if (!isbn) {
           if (codes.length) status.textContent = "ISBNバーコードではありません。978または979で始まるバーコードを写してください。";
@@ -947,6 +1045,7 @@ async function startBarcodeScanner() {
       });
     }, 350);
   } catch (error) {
+    if (generation !== scannerGeneration) return;
     const message = error instanceof Error && error.message === "barcode-unsupported"
       ? "このブラウザーはバーコード読み取りに対応していません。ISBNを入力して検索してください。"
       : error instanceof Error && error.message === "camera-unsupported"
@@ -958,64 +1057,93 @@ async function startBarcodeScanner() {
   }
 }
 
-function addCatalogBook(catalogBook: CatalogBook, source = "検索") {
-  const now = todayIso();
-  const selectedStatus = $<HTMLSelectElement>("#catalog-status").value;
-  const status: BookStatus = isBookStatus(selectedStatus) ? selectedStatus : "read";
-  const candidate: Book = { ...catalogBook, id: crypto.randomUUID(), status, rating: 0, finishedAt: status === "read" ? now : "", createdAt: now, notes: settings.synopsis ? catalogBook.synopsis || "" : "", review: "" };
-  if (candidate.coverUrl) {
-    candidate.coverLookupKey = coverLookupKey(candidate);
-    candidate.coverCheckedAt = new Date().toISOString();
+function saveLibraryChange(next: Book[]): boolean {
+  try {
+    saveBooks(next);
+    books = next;
+    return true;
+  } catch {
+    showToast("保存できませんでした。入力は保持しています。端末の空き容量やブラウザーの保存設定を確認し、もう一度保存してください。");
+    return false;
   }
-  if (hasDuplicateBook(books, candidate)) {
-    showToast(`「${catalogBook.title}」はすでに本棚にあります`);
-    return;
-  }
-  books.unshift(candidate);
-  persist();
-  renderAll();
-  closeDialog("add-dialog");
-  showToast(`${source}から「${catalogBook.title}」を${statusLabel(status)}の本に追加しました`);
-  queuePriorityCoverLookup(candidate.id);
+}
+
+function showDuplicate(candidate: Book): boolean {
+  const existing = books.find(book => hasDuplicateBook([book], candidate));
+  if (!existing) return false;
+  showToast(`「${candidate.title}」はすでに本棚にあります`);
+  const feedback = document.querySelector<HTMLElement>("dialog[open] .inline-feedback");
+  if (feedback) feedback.innerHTML = `<span>「${escapeHtml(candidate.title)}」はすでに本棚にあります。</span><button type="button" class="text-button" data-open-existing="${escapeHtml(existing.id)}">登録済みの記録を開く</button>`;
+  return true;
 }
 
 function openBookDetail(id: string) {
+  if (!books.some(book => book.id === id)) return;
+  detailScroll.delete(id);
+  routeTo("detail", id);
+}
+
+function recordHeader(title: string): string {
+  return `<header class="record-header"><button class="icon-button" data-detail-action="back" type="button" aria-label="戻る"><i data-lucide="arrow-left"></i></button><h2 id="record-heading" tabindex="-1">${title}</h2><button class="icon-button" data-close="detail-dialog" type="button" aria-label="閉じる"><i data-lucide="x"></i></button></header>`;
+}
+
+function renderBookDetail(id: string, editing: boolean) {
   const book = books.find(item => item.id === id);
-  if (!book) return;
-  $("#detail-content").innerHTML = `
-    <form class="detail-layout" id="detail-form" data-book-id="${escapeHtml(book.id)}" data-rating="${book.rating}">
-      <div class="detail-cover-panel">
-        <div class="detail-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" id="detail-cover-visual" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">${coverImageMarkup(book)}</div>
-        <div class="detail-cover-meta" id="detail-cover-source">${coverSourceMarkup(book)}</div>
-        <button class="cover-refresh-button" type="button" data-detail-action="refresh-cover"><i data-lucide="refresh-cw"></i><span>表紙を再取得</span></button>
+  if (!book) {
+    $("#detail-content").innerHTML = `<div class="record-shell">${recordHeader("本の記録")}<div class="record-scroll"><p>この本は本棚にありません。</p></div></div>`;
+    return;
+  }
+  const cover = `<div class="detail-cover${hasRenderableCover(book) ? " has-real-cover" : ""}" id="detail-cover-visual" style="--cover-position:${COVER_POSITIONS[book.cover % 6]}">${coverImageMarkup(book)}</div>`;
+  const hero = `<div class="record-hero">${cover}<div><span class="record-status">${statusLabel(book.status)}</span><h3>${escapeHtml(book.title)}</h3><p>${escapeHtml(book.author)}</p><div class="record-rating">${book.rating ? `<span aria-label="評価${book.rating}">★ ${book.rating} / 5</span>` : "未評価"}${book.status === "read" ? `<span>${formatDate(book.finishedAt)}</span>` : ""}</div></div></div>`;
+  const feedback = `<div class="inline-feedback" id="detail-feedback" role="status" aria-live="polite" ${detailNotice ? "" : "hidden"}>${escapeHtml(detailNotice)}</div>`;
+  detailNotice = "";
+  if (!editing) {
+    $("#detail-content").innerHTML = `<div class="record-shell" data-record-id="${escapeHtml(book.id)}">
+      ${recordHeader("本の記録")}
+      <div class="record-scroll">
+        ${hero}${feedback}
+        <section class="record-section"><h3>感想</h3>${book.review.trim() ? `<p class="record-prose">${escapeHtml(book.review)}</p>` : `<p class="record-placeholder">この本の感想を残してみませんか。</p><button type="button" class="text-button" data-detail-action="edit">感想を書く</button>`}</section>
+        <section class="record-section"><h3>メモ</h3>${book.notes.trim() ? `<p class="record-prose">${escapeHtml(book.notes)}</p>` : '<p class="record-placeholder">メモはまだありません。</p>'}</section>
+        <details class="record-metadata"><summary>書誌情報・表紙・共有 <i data-lucide="chevron-down"></i></summary><dl><div><dt>ジャンル</dt><dd>${escapeHtml(book.genre)}</dd></div><div><dt>出版社</dt><dd>${escapeHtml(book.publisher || "未登録")}</dd></div><div><dt>ページ数</dt><dd>${book.pages ? `${book.pages.toLocaleString()}ページ` : "未登録"}</dd></div><div><dt>ISBN</dt><dd>${escapeHtml(book.isbn || "未登録")}</dd></div></dl><div class="detail-cover-meta" id="detail-cover-source">${coverSourceMarkup(book)}</div><div class="metadata-actions"><button class="secondary-button" type="button" data-detail-action="refresh-cover"><i data-lucide="refresh-cw"></i>表紙を再取得</button><button class="secondary-button" type="button" data-detail-action="share"><i data-lucide="share-2"></i>本を共有</button></div></details>
       </div>
-      <div class="detail-form">
-        <span class="section-kicker">BOOK RECORD</span>
-        <h2>${escapeHtml(book.title)}</h2>
-        <p class="detail-author">${escapeHtml(book.author)}</p>
-        <div class="detail-stats"><span>${escapeHtml(book.genre)}</span>${book.publisher ? `<span>${escapeHtml(book.publisher)}</span>` : ""}<span>${Number(book.pages || 0).toLocaleString()}ページ</span><span>ISBN ${escapeHtml(book.isbn || "未登録")}</span></div>
-        <span class="section-kicker">RATING</span>
-        <div class="rating-control" role="group" aria-label="評価">
-          ${[1,2,3,4,5].map(value => `<button class="${value <= book.rating ? "is-active" : ""}" type="button" data-rating="${value}" aria-label="評価${value}"><i data-lucide="star"></i></button>`).join("")}
+      <footer class="record-actions"><button class="primary-button" type="button" id="edit-book" data-detail-action="edit"><i data-lucide="pencil-line"></i><span>記録を編集</span></button></footer>
+    </div>`;
+  } else {
+    $("#detail-content").innerHTML = `<form class="record-shell" id="detail-form" data-record-id="${escapeHtml(book.id)}" data-book-id="${escapeHtml(book.id)}" data-rating="${book.rating}" novalidate>
+      ${recordHeader("記録を編集")}
+      <div class="record-scroll">
+        <div class="edit-book-heading"><strong>${escapeHtml(book.title)}</strong><span>${escapeHtml(book.author)}</span></div>
+        ${feedback}
+        <div class="edit-reading-fields">
+          <label class="field"><span>読書状況</span><select name="status"><option value="read" ${book.status === "read" ? "selected" : ""}>読了</option><option value="reading" ${book.status === "reading" ? "selected" : ""}>読書中</option><option value="wishlist" ${book.status === "wishlist" ? "selected" : ""}>読みたい</option></select></label>
+          <label class="field" id="detail-finished-field" ${book.status !== "read" ? "hidden" : ""}><span>読了日</span><input name="finishedAt" type="date" value="${escapeHtml(book.finishedAt)}" ${book.status !== "read" ? "disabled" : ""}></label>
         </div>
-        <div class="detail-fields">
-          <label class="field"><span>タイトル</span><input name="title" value="${escapeHtml(book.title)}" required maxlength="500"></label>
-          <label class="field"><span>著者</span><input name="author" value="${escapeHtml(book.author)}" required maxlength="300"></label>
-          <div class="detail-metadata-grid">
-            <label class="field"><span>ISBN</span><input name="isbn" value="${escapeHtml(book.isbn)}" maxlength="30" inputmode="text" placeholder="ISBN-10 / ISBN-13"></label>
-            <label class="field"><span>ジャンル</span><input name="genre" value="${escapeHtml(book.genre)}" list="genre-options" maxlength="100"></label>
-            <label class="field"><span>ページ数</span><input name="pages" type="number" min="0" max="100000" inputmode="numeric" value="${book.pages || ""}"></label>
-            <label class="field"><span>出版社</span><input name="publisher" value="${escapeHtml(book.publisher || "")}" maxlength="300"></label>
-          </div>
-          <label class="field"><span>本棚</span><select name="status"><option value="read" ${book.status === "read" ? "selected" : ""}>読んだ</option><option value="reading" ${book.status === "reading" ? "selected" : ""}>読書中</option><option value="wishlist" ${book.status === "wishlist" ? "selected" : ""}>読みたい</option></select></label>
-          <label class="field"><span>読了日</span><input name="finishedAt" type="date" value="${escapeHtml(book.finishedAt || "")}"></label>
-          <label class="field"><span>メモ</span><textarea name="notes" maxlength="50000" placeholder="引用やページ番号、気づきを記録">${escapeHtml(book.notes || "")}</textarea></label>
-          <label class="field"><span>感想</span><textarea name="review" maxlength="50000" placeholder="読後の感想を記録">${escapeHtml(book.review || "")}</textarea></label>
-        </div>
-        <div class="detail-actions"><button class="primary-button" type="button" id="save-book" data-detail-action="save"><i data-lucide="save"></i><span>変更を保存</span></button><button class="icon-button" type="button" id="share-book" data-detail-action="share" aria-label="本を共有" title="本を共有"><i data-lucide="share-2"></i></button><button class="icon-button danger-button" type="button" id="delete-book" data-detail-action="delete" aria-label="本を削除" title="本を削除"><i data-lucide="trash-2"></i></button></div>
+        <div class="field"><span>評価 <span id="rating-value">${book.rating ? `${book.rating} / 5` : "未評価"}</span></span><div class="rating-control" role="group" aria-label="評価">${[1,2,3,4,5].map(value => `<button class="${value <= book.rating ? "is-active" : ""}" type="button" data-rating="${value}" aria-pressed="${value === book.rating}" aria-label="評価${value}"><i data-lucide="star"></i></button>`).join("")}<button class="text-button clear-rating" type="button" data-rating="0" aria-label="評価を解除">解除</button></div></div>
+        <label class="field"><span>感想</span><textarea name="review" maxlength="50000" placeholder="読後の感想を記録">${escapeHtml(book.review)}</textarea></label>
+        <label class="field"><span>メモ</span><textarea name="notes" maxlength="50000" placeholder="引用やページ番号、気づきを記録">${escapeHtml(book.notes)}</textarea></label>
+        <details class="record-metadata" id="detail-metadata"><summary>書誌情報を編集 <i data-lucide="chevron-down"></i></summary><div class="detail-metadata-grid">
+          <label class="field span-2"><span>タイトル *</span><input name="title" value="${escapeHtml(book.title)}" required maxlength="500"></label>
+          <label class="field span-2"><span>著者 *</span><input name="author" value="${escapeHtml(book.author)}" required maxlength="300"></label>
+          <label class="field"><span>ISBN</span><input name="isbn" value="${escapeHtml(book.isbn)}" maxlength="30" inputmode="text"></label>
+          <label class="field"><span>ジャンル</span><input name="genre" value="${escapeHtml(book.genre)}" list="genre-options" maxlength="100"></label>
+          <label class="field"><span>ページ数</span><input name="pages" type="number" min="0" max="100000" inputmode="numeric" value="${book.pages || ""}"></label>
+          <label class="field"><span>出版社</span><input name="publisher" value="${escapeHtml(book.publisher || "")}" maxlength="300"></label>
+        </div></details>
+        <button class="text-button danger-button delete-record" type="button" id="delete-book" data-detail-action="delete"><i data-lucide="trash-2"></i>この本を削除</button>
       </div>
+      <footer class="record-actions"><button class="primary-button" type="submit" id="save-book"><i data-lucide="check"></i><span>変更を保存</span></button></footer>
     </form>`;
-  $<HTMLDialogElement>("#detail-dialog").showModal();
+    const form = $<HTMLFormElement>("#detail-form");
+    detailBaseline = formSignature(form);
+    form.addEventListener("submit", event => { event.preventDefault(); saveBookDetail(form); });
+    $<HTMLSelectElement>('[name="status"]', form).addEventListener("change", () => {
+      const isRead = $<HTMLSelectElement>('[name="status"]', form).value === "read";
+      const date = $<HTMLInputElement>('[name="finishedAt"]', form);
+      $("#detail-finished-field").hidden = !isRead;
+      date.disabled = !isRead;
+      if (isRead && !date.value) date.value = todayIso();
+    });
+  }
   iconize();
 }
 
@@ -1027,23 +1155,18 @@ function saveBookDetail(form: HTMLFormElement) {
   const isbnInput = $<HTMLInputElement>('[name="isbn"]', form);
   const rawIsbn = String(formData.get("isbn") || "").trim();
   isbnInput.setCustomValidity(rawIsbn && !isValidIsbn(rawIsbn) ? "ISBN-10またはISBN-13を確認してください" : "");
-  if (!form.reportValidity()) return;
+  for (const name of ["title", "author"]) {
+    const input = $<HTMLInputElement>(`[name="${name}"]`, form);
+    input.setCustomValidity(input.value.trim() ? "" : "入力してください");
+  }
+  if (!form.checkValidity()) {
+    $<HTMLDetailsElement>("#detail-metadata").open = true;
+    form.reportValidity();
+    return;
+  }
   const status = String(formData.get("status"));
   const nextStatus: BookStatus = isBookStatus(status) ? status : "read";
-  const candidate = normalizeBook({
-    ...book,
-    title: formData.get("title"),
-    author: formData.get("author"),
-    isbn: rawIsbn ? normalizeIsbn(rawIsbn) : "",
-    genre: formData.get("genre"),
-    pages: formData.get("pages"),
-    publisher: formData.get("publisher"),
-    status: nextStatus,
-    rating: Number(form.dataset.rating || 0),
-    finishedAt: nextStatus === "read" ? String(formData.get("finishedAt") || todayIso()) : "",
-    notes: formData.get("notes"),
-    review: formData.get("review"),
-  });
+  const candidate = normalizeBook({ ...book, title: formData.get("title"), author: formData.get("author"), isbn: rawIsbn ? normalizeIsbn(rawIsbn) : "", genre: formData.get("genre"), pages: formData.get("pages"), publisher: formData.get("publisher"), status: nextStatus, rating: Number(form.dataset.rating || 0), finishedAt: nextStatus === "read" ? String(formData.get("finishedAt") || todayIso()) : "", notes: formData.get("notes"), review: formData.get("review") });
   if (!candidate) return;
   if (hasDuplicateBook(books.filter(item => item.id !== book.id), candidate)) {
     showToast("同じISBN、または同じ書名と著者の本がすでにあります");
@@ -1056,11 +1179,10 @@ function saveBookDetail(form: HTMLFormElement) {
     candidate.coverLookupKey = undefined;
     candidate.coverCheckedAt = undefined;
   }
-  Object.assign(book, candidate, { id: book.id, createdAt: book.createdAt });
-  persist();
-  renderAll();
-  closeDialog("detail-dialog");
-  showToast("読書記録を更新しました");
+  if (!saveLibraryChange(books.map(item => item.id === candidate.id ? candidate : item))) return;
+  detailBaseline = formSignature(form);
+  detailNotice = "読書記録を更新しました";
+  navigation.returnTo(route => route.layer === "detail" && route.bookId === book.id);
   if (coverIdentityChanged) queuePriorityCoverLookup(book.id);
 }
 
@@ -1078,11 +1200,11 @@ function shareBook(id: string) {
 
 function deleteBook(id: string) {
   const book = books.find(item => item.id === id);
-  if (!book || !window.confirm(`「${book.title}」を本棚から削除しますか？`)) return;
-  books = books.filter(item => item.id !== id);
-  persist();
-  renderAll();
-  closeDialog("detail-dialog");
+  if (!book || !window.confirm(`「${book.title}」を本棚から削除しますか？この操作は取り消せません。`)) return;
+  if (!saveLibraryChange(books.filter(item => item.id !== id))) return;
+  const form = document.querySelector<HTMLFormElement>("#detail-form");
+  if (form) detailBaseline = formSignature(form);
+  navigation.returnTo(route => route.layer === "none");
   showToast("本棚から削除しました");
 }
 
@@ -1163,8 +1285,11 @@ function applyTheme(theme: ThemePreference) {
   settings.theme = theme;
   const resolved = theme === "system" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : theme;
   document.body.dataset.theme = resolved;
-  $$('[data-theme]').forEach(button => button.classList.toggle("is-active", button.dataset.theme === theme));
-  persist();
+  $$('#theme-control [data-theme]').forEach(button => {
+    button.classList.toggle("is-active", button.dataset.theme === theme);
+    button.setAttribute("aria-pressed", String(button.dataset.theme === theme));
+  });
+  try { saveSettings(settings); } catch { showToast("外観の設定を保存できませんでした"); }
 }
 
 function updateGoalUI() {
@@ -1192,7 +1317,7 @@ function initializeEvents() {
     if (closeButton?.dataset.close) closeDialog(closeButton.dataset.close);
 
     const tab = target.closest<HTMLElement>(".shelf-tab");
-    if (isBookStatus(tab?.dataset.filter)) setFilter(tab.dataset.filter);
+    if (isShelfFilter(tab?.dataset.filter)) setFilter(tab.dataset.filter);
 
     const viewButton = target.closest<HTMLElement>("[data-view]");
     if (viewButton) {
@@ -1210,7 +1335,7 @@ function initializeEvents() {
     const catalogButton = target.closest<HTMLElement>("[data-catalog-isbn]");
     if (catalogButton) {
       const book = visibleCatalogBooks.find(item => item.isbn === catalogButton.dataset.catalogIsbn);
-      if (book) addCatalogBook(book, book.source === "openbd" ? "openBD" : "検索");
+      if (book) selectCatalogBook(book);
     }
 
     const manualResultButton = target.closest<HTMLElement>("[data-manual-result-index]");
@@ -1222,7 +1347,6 @@ function initializeEvents() {
       if (key === "query") {
         query = "";
         $<HTMLInputElement>("#library-search").value = "";
-        $("#search-panel").hidden = true;
       }
       if (key === "genre") shelfCriteria.genre = "";
       if (key === "rating") shelfCriteria.rating = "";
@@ -1256,67 +1380,72 @@ function initializeEvents() {
       if (!form) return;
       const nextRating = Number(form.dataset.rating || 0) === rating ? 0 : rating;
       form.dataset.rating = String(nextRating);
-      $$(".rating-control [data-rating]", form).forEach(button => button.classList.toggle("is-active", Number(button.dataset.rating) <= nextRating));
+      $$(".rating-control [data-rating]", form).forEach(button => {
+        button.classList.toggle("is-active", Number(button.dataset.rating) > 0 && Number(button.dataset.rating) <= nextRating);
+        button.setAttribute("aria-pressed", String(Number(button.dataset.rating) === nextRating));
+      });
+      $("#rating-value").textContent = nextRating ? `${nextRating} / 5` : "未評価";
     }
 
-    const themeButton = target.closest<HTMLElement>("[data-theme]");
+    const themeButton = target.closest<HTMLElement>("#theme-control [data-theme]");
     if (isThemePreference(themeButton?.dataset.theme)) applyTheme(themeButton.dataset.theme);
 
+    const existing = target.closest<HTMLElement>("[data-open-existing]");
+    if (existing?.dataset.openExisting) {
+      navigation.returnTo(route => route.layer === "none", { screen: currentRoute.screen, layer: "detail", bookId: existing.dataset.openExisting, shelf: getShelfState() });
+    }
     const detailAction = target.closest<HTMLButtonElement>("[data-detail-action]");
     if (detailAction) {
-      const form = detailAction.closest<HTMLFormElement>("#detail-form");
-      const bookId = form?.dataset.bookId;
-      if (!form || !bookId) return;
-      if (detailAction.dataset.detailAction === "refresh-cover") {
-        void refreshBookCover(bookId, detailAction);
-        return;
-      }
-      if (detailAction.dataset.detailAction === "save") saveBookDetail(form);
-      if (detailAction.dataset.detailAction === "share") shareBook(bookId);
-      if (detailAction.dataset.detailAction === "delete") deleteBook(bookId);
+      const action = detailAction.dataset.detailAction;
+      const bookId = currentRoute.bookId;
+      if (action === "back") { navigation.back(); return; }
+      if (!bookId) return;
+      if (action === "edit") routeTo("edit", bookId);
+      if (action === "refresh-cover") void refreshBookCover(bookId, detailAction);
+      if (action === "share") shareBook(bookId);
+      if (action === "delete") deleteBook(bookId);
     }
   });
 
   $("#open-add").addEventListener("click", () => openAddDialog());
   $("#bottom-add").addEventListener("click", () => openAddDialog());
-  $("#search-toggle").addEventListener("click", () => {
-    $("#filter-panel").hidden = true;
-    $("#filter-toggle").setAttribute("aria-expanded", "false");
-    $("#search-panel").hidden = false;
-    $<HTMLInputElement>("#library-search").focus();
+  $("#filter-toggle").addEventListener("click", () => routeTo("filter"));
+  $("#close-filter").addEventListener("click", () => closeDialog("filter-panel"));
+  $("#apply-filters").addEventListener("click", () => {
+    const shelf = { ...getShelfState(), criteria: { ...filterDraft } };
+    navigation.returnTo(route => route.layer === "none", { screen: "shelf", layer: "none", shelf }, true);
   });
-  $("#filter-toggle").addEventListener("click", () => {
-    const panel = $("#filter-panel");
-    const willOpen = panel.hidden;
-    panel.hidden = !willOpen;
-    $("#filter-toggle").setAttribute("aria-expanded", String(willOpen));
-    if (willOpen) {
-      $("#search-panel").hidden = true;
-      renderShelfFilterControls();
-    }
+  $("#close-search").addEventListener("click", () => {
+    query = "";
+    $<HTMLInputElement>("#library-search").value = "";
+    renderBooks();
+    $("#library-search").focus();
   });
-  $("#close-filter").addEventListener("click", () => {
-    $("#filter-panel").hidden = true;
-    $("#filter-toggle").setAttribute("aria-expanded", "false");
-  });
-  $("#close-search").addEventListener("click", () => { query = ""; $<HTMLInputElement>("#library-search").value = ""; $("#search-panel").hidden = true; renderBooks(); });
   $<HTMLInputElement>("#library-search").addEventListener("input", event => { query = (event.currentTarget as HTMLInputElement).value; renderBooks(); });
-  $<HTMLSelectElement>("#filter-genre").addEventListener("change", event => { shelfCriteria.genre = (event.currentTarget as HTMLSelectElement).value; renderBooks(); });
-  $<HTMLSelectElement>("#filter-rating").addEventListener("change", event => { shelfCriteria.rating = (event.currentTarget as HTMLSelectElement).value; renderBooks(); });
-  $<HTMLInputElement>("#filter-month").addEventListener("change", event => {
-    shelfCriteria.finishedPeriod = (event.currentTarget as HTMLInputElement).value;
-    if (shelfCriteria.finishedPeriod) setFilter("read");
-    else renderBooks();
-  });
-  $("#clear-criteria").addEventListener("click", () => { resetShelfCriteria(); renderBooks(); });
+  $<HTMLSelectElement>("#filter-genre").addEventListener("change", event => { filterDraft.genre = (event.currentTarget as HTMLSelectElement).value; renderFilterDraft(); });
+  $<HTMLSelectElement>("#filter-rating").addEventListener("change", event => { filterDraft.rating = (event.currentTarget as HTMLSelectElement).value; renderFilterDraft(); });
+  $<HTMLInputElement>("#filter-month").addEventListener("change", event => { filterDraft.finishedPeriod = (event.currentTarget as HTMLInputElement).value; renderFilterDraft(); });
+  $("#clear-criteria").addEventListener("click", () => { filterDraft = { genre: "", rating: "", finishedPeriod: "" }; renderFilterDraft(); });
   $("#clear-all-filters").addEventListener("click", clearAllShelfFilters);
   $("#sort-books").addEventListener("change", renderBooks);
+  $(".shelf-tabs").addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const tabs = $$<HTMLButtonElement>(".shelf-tab");
+    const current = tabs.findIndex(tab => tab.dataset.filter === activeFilter);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    event.preventDefault();
+    const tab = tabs[next]!;
+    setFilter(tab.dataset.filter as ShelfFilter);
+    tab.focus();
+  });
   $<HTMLSelectElement>("#analytics-year").addEventListener("change", renderAnalytics);
   $<HTMLInputElement>("#catalog-search").addEventListener("input", event => scheduleCatalogSearch((event.currentTarget as HTMLInputElement).value));
   $("#start-barcode-scan").addEventListener("click", () => { void startBarcodeScanner(); });
   $("#stop-barcode-scan").addEventListener("click", stopBarcodeScanner);
   $("#manual-book-search").addEventListener("click", () => { void searchManualBooks($<HTMLInputElement>("#manual-book-query").value); });
   $("#manual-enter-directly").addEventListener("click", prepareDirectManualEntry);
+  $("#isbn-enter-directly").addEventListener("click", prepareDirectManualEntry);
+  $("#retry-catalog").addEventListener("click", () => { void searchCatalog($<HTMLInputElement>("#catalog-search").value); });
   $("#manual-back-to-search").addEventListener("click", () => setManualStage("search"));
   $<HTMLInputElement>("#manual-book-query").addEventListener("keydown", event => {
     if (event.key !== "Enter") return;
@@ -1325,12 +1454,8 @@ function initializeEvents() {
   });
   $("#empty-add-isbn").addEventListener("click", () => openAddDialog("search"));
   $("#empty-add-manual").addEventListener("click", () => openAddDialog("manual"));
-  $("#empty-clear-search").addEventListener("click", () => {
-    query = "";
-    $<HTMLInputElement>("#library-search").value = "";
-    $("#search-panel").hidden = true;
-    renderBooks();
-  });
+  $("#empty-clear-search").addEventListener("click", clearAllShelfFilters);
+  $("#empty-search-all").addEventListener("click", () => { resetShelfCriteria(); setFilter("all"); });
 
   $<HTMLSelectElement>('#manual-form [name="status"]').addEventListener("change", syncManualFinishedAt);
   syncManualFinishedAt();
@@ -1344,6 +1469,10 @@ function initializeEvents() {
     const isbnInput = $<HTMLInputElement>('[name="isbn"]', form);
     const rawIsbn = String(data.get("isbn") || "").trim();
     isbnInput.setCustomValidity(rawIsbn && !isValidIsbn(rawIsbn) ? "ISBN-10またはISBN-13を確認してください" : "");
+    for (const name of ["title", "author"]) {
+      const input = $<HTMLInputElement>(`[name="${name}"]`, form);
+      input.setCustomValidity(input.value.trim() ? "" : "入力してください");
+    }
     if (!form.checkValidity()) {
       $<HTMLDetailsElement>("#manual-details").open = true;
       form.reportValidity();
@@ -1354,8 +1483,7 @@ function initializeEvents() {
     const normalizedInputIsbn = rawIsbn ? normalizeIsbn(rawIsbn) : "";
     const selected = selectedManualCatalogBook;
     const selectedMatches = Boolean(selected && (
-      (normalizedInputIsbn && selected.isbn && normalizedInputIsbn === normalizeIsbn(selected.isbn))
-      || (title.toLocaleLowerCase("ja") === selected.title.toLocaleLowerCase("ja") && author.toLocaleLowerCase("ja") === selected.author.toLocaleLowerCase("ja"))
+      (normalizedInputIsbn ? normalizedInputIsbn === normalizeIsbn(selected.isbn) : !selected.isbn && title.toLocaleLowerCase("ja") === selected.title.toLocaleLowerCase("ja") && author.toLocaleLowerCase("ja") === selected.author.toLocaleLowerCase("ja"))
     ));
     const notes = String(data.get("notes") || "");
     const candidate = normalizeBook({
@@ -1375,32 +1503,18 @@ function initializeEvents() {
       cover: selectedMatches && selected ? selected.cover : books.length % 6,
       coverUrl: selectedMatches ? selected?.coverUrl || "" : "",
       coverSource: selectedMatches ? selected?.coverSource : undefined,
-      source: selectedMatches ? "catalog" : "manual",
+      source: selectedMatches ? selected?.source || "catalog" : "manual",
     });
     if (!candidate) return;
-    if (hasDuplicateBook(books, candidate)) {
-      showToast(`「${candidate.title}」はすでに本棚にあります`);
-      return;
-    }
+    if (showDuplicate(candidate)) return;
     if (candidate.coverUrl) {
       candidate.coverLookupKey = coverLookupKey(candidate);
       candidate.coverCheckedAt = new Date().toISOString();
     }
-    books.unshift(candidate);
-    persist();
-    renderAll();
-    form.reset();
-    selectedManualCatalogBook = null;
-    visibleManualSearchBooks = [];
-    $<HTMLInputElement>("#manual-book-query").value = "";
-    $("#manual-search-source").textContent = "候補を選ぶと、確認画面へ進みます。";
-    updateNdlSearchLink("");
-    renderManualSearchResults([]);
-    $<HTMLInputElement>("#manual-finished-at").value = todayIso();
-    syncManualFinishedAt();
-    setManualStage("search");
-    closeDialog("add-dialog");
-    showToast("新しい本を追加しました");
+    if (!saveLibraryChange([candidate, ...books])) return;
+    addBaseline = formSignature(form);
+    detailNotice = `「${candidate.title}」を本棚に追加しました`;
+    navigation.returnTo(route => route.layer === "none", { screen: currentRoute.screen, layer: "detail", bookId: candidate.id, shelf: getShelfState() });
     queuePriorityCoverLookup(candidate.id);
   });
 
@@ -1430,10 +1544,20 @@ function initializeEvents() {
     applyAnalyticsShelfFilter({ genre, finishedPeriod: (event.currentTarget as HTMLElement).dataset.insightPeriod || "" });
   });
 
-  $$<HTMLDialogElement>('dialog').forEach(dialog => dialog.addEventListener("click", event => {
-    if (event.target === dialog) closeDialog(dialog.id);
-  }));
-  $<HTMLDialogElement>("#add-dialog").addEventListener("close", stopBarcodeScanner);
+  $$<HTMLDialogElement>("dialog").forEach(dialog => {
+    dialog.addEventListener("cancel", event => { event.preventDefault(); navigation.back(); });
+    dialog.addEventListener("click", event => {
+      if (event.target !== dialog) return;
+      const bounds = dialog.getBoundingClientRect();
+      if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) closeDialog(dialog.id);
+    });
+  });
+  window.addEventListener("beforeunload", event => {
+    const form = document.querySelector<HTMLFormElement>("#detail-form");
+    const dirtyEdit = currentRoute.layer === "edit" && form && formSignature(form) !== detailBaseline;
+    const dirtyAdd = ["add", "confirm"].includes(currentRoute.layer) && addBaseline && formSignature($<HTMLFormElement>("#manual-form")) !== addBaseline;
+    if (dirtyEdit || dirtyAdd) { event.preventDefault(); event.returnValue = ""; }
+  });
   window.addEventListener("online", () => {
     coverLookupSessionAttempts = 0;
     scheduleCoverBackfill(300);
@@ -1445,6 +1569,9 @@ function initialize() {
   const localToday = todayIso(now);
   $("#today-label").textContent = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric" }).format(now).toUpperCase();
   $<HTMLInputElement>("#manual-finished-at").value = localToday;
+  $<HTMLSelectElement>("#sort-books").value = shelfPreferences.sort;
+  currentRoute = { screen: "shelf", layer: "none", shelf: getShelfState() };
+  navigation = createNavigation(currentRoute, applyRoute, canLeaveRoute);
   applyTheme(settings.theme);
   initializeEvents();
   initializeInstallExperience();

@@ -191,6 +191,7 @@ def run() -> None:
         form.locator("[name=notes]").fill("42ページの引用を読み返す")
         form.locator("[name=review]").fill("静かな余韻が残った。")
         form.locator("button[type=submit]").click()
+        page.locator("#edit-book").wait_for()
         assert page.locator("#book-grid .book-card").count() == 1
         assert page.locator("#read-count").inner_text() == "1"
         page.reload(wait_until="networkidle")
@@ -199,6 +200,8 @@ def run() -> None:
         assert page.evaluate("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books[0].coverSource") == "openlibrary"
 
         page.get_by_role("button", name="境界を歩くの詳細を開く").click()
+        page.locator("#edit-book").click()
+        page.locator("#detail-metadata summary").click()
         detail = page.locator("#detail-form")
         detail.locator('[name="isbn"]').fill("123")
         page.locator("#save-book").click()
@@ -210,8 +213,9 @@ def run() -> None:
         detail.locator('[name="notes"]').fill("検証用の読書メモ")
         detail.get_by_role("button", name="評価4").click()
         page.locator("#save-book").click()
-        page.locator("#detail-dialog").wait_for(state="hidden")
-        page.get_by_role("button", name="境界を歩くの詳細を開く").click()
+        page.locator("#edit-book").wait_for()
+        page.locator("#edit-book").click()
+        page.locator("#detail-metadata summary").click()
         saved_isbn = page.locator('#detail-form [name="isbn"]').input_value()
         assert saved_isbn == "9784101010014", saved_isbn
         assert page.locator('#detail-form [name="pages"]').input_value() == "192"
@@ -236,7 +240,6 @@ def run() -> None:
         }
         google_books_covers[openbd_isbn] = "https://books.google.com/books/content?id=GB-YOMU-ISBN&printsec=frontcover&img=1&zoom=5"
         page.locator("#bottom-add").click()
-        page.locator("#catalog-status").select_option("wishlist")
         page.evaluate(
             f"""() => {{
                 const canvas = document.createElement('canvas');
@@ -265,11 +268,16 @@ def run() -> None:
         page.locator("#start-barcode-scan").click()
         page.locator("#barcode-scanner").wait_for()
         page.screenshot(path=str(ARTIFACTS / "mobile-isbn-camera.png"), full_page=True)
-        result_button = page.get_by_role("button", name="型で育てる読書記録を追加")
+        result_button = page.get_by_role("button", name="型で育てる読書記録を確認して追加")
         result_button.wait_for()
         assert page.locator("#catalog-search").input_value() == openbd_isbn
-        assert page.locator("#catalog-results .result-cover.has-real-cover").count() == 1
+        page.wait_for_function("document.querySelectorAll('#catalog-results .result-cover.has-real-cover').length === 1")
         result_button.click()
+        page.locator('#manual-form [name="status"]').select_option("wishlist")
+        page.locator('#manual-form button[type="submit"]').click()
+        page.locator("#edit-book").wait_for()
+        page.locator('#detail-dialog [data-close]').click()
+        page.locator('#detail-dialog').wait_for(state="hidden")
         page.locator('[data-filter="wishlist"]').click()
         assert page.locator("#book-grid .book-card").count() == 1
         page.wait_for_function("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books.some(book => book.isbn === '9784873113364' && book.coverSource === 'googlebooks')")
@@ -279,10 +287,11 @@ def run() -> None:
         page.locator("#bottom-add").click()
         page.locator("#catalog-search").fill("")
         page.locator("#catalog-search").fill(openbd_isbn)
-        duplicate_button = page.get_by_role("button", name="型で育てる読書記録を追加")
+        duplicate_button = page.get_by_role("button", name="型で育てる読書記録を確認して追加")
         duplicate_button.wait_for()
         duplicate_button.click()
-        assert "すでに本棚にあります" in page.locator("#toast").inner_text()
+        page.locator('#manual-form button[type="submit"]').click()
+        assert "すでに本棚にあります" in page.locator("#add-feedback").inner_text()
         page.locator('#add-dialog [data-close="add-dialog"]').click()
         page.locator('[data-filter="read"]').click()
 
@@ -313,12 +322,17 @@ def run() -> None:
         page.locator("#filter-rating").select_option("4")
         page.locator("#filter-month").fill(today[:7])
         page.locator("#filter-month").dispatch_event("change")
+        page.screenshot(path=str(ARTIFACTS / "mobile-filter-draft.png"))
+        page.locator("#apply-filters").click()
+        page.locator("#filter-panel").wait_for(state="hidden")
         assert page.locator("#filter-count").inner_text() == "3"
         assert page.locator("#book-grid .book-card").count() == 1
         page.screenshot(path=str(ARTIFACTS / "mobile-shelf-filters.png"), full_page=True)
+        page.locator("#filter-toggle").click()
         page.locator("#clear-criteria").click()
+        page.locator("#apply-filters").click()
+        page.locator("#filter-panel").wait_for(state="hidden")
         assert page.locator("#filter-count").is_hidden()
-        page.locator("#close-filter").click()
         page.wait_for_timeout(250)
         page.screenshot(path=str(ARTIFACTS / "mobile-shelf.png"), full_page=True)
 
@@ -539,7 +553,7 @@ def run() -> None:
                 "cover_requests": cover_api_requests,
             }, ensure_ascii=False, indent=2))
             raise
-        cover_page.wait_for_function("!document.querySelector('[data-book-id=\"broken-cover\"]').classList.contains('has-real-cover')")
+        cover_page.wait_for_function("!document.querySelector('[data-book-id=\"broken-cover\"] .book-cover').classList.contains('has-real-cover')")
         assert cover_page.locator("#book-grid .book-cover.has-real-cover").count() == 6
         assert not cover_page.locator('[data-book-id="openbd-cover"] .cover-copy').is_visible()
         assert cover_page.locator('[data-book-id="wrong-cover"] .real-cover-image').count() == 0
@@ -556,6 +570,7 @@ def run() -> None:
         assert not cover_page.evaluate("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books.find(book => book.id === 'network-error').coverCheckedAt")
 
         cover_page.get_by_role("button", name="Google Books表紙本の詳細を開く").click()
+        cover_page.locator(".record-metadata summary").click()
         assert "Google Books" in cover_page.locator("#detail-cover-source").inner_text()
         cover_page.locator('#detail-dialog [data-close="detail-dialog"]').click()
 
@@ -567,6 +582,7 @@ def run() -> None:
             "isbn": [],
             "cover_i": 404,
         }]
+        cover_page.locator(".record-metadata summary").click()
         cover_page.get_by_role("button", name="表紙を再取得").click()
         cover_page.wait_for_function("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books.find(book => book.id === 'wrong-cover').coverSource === 'openlibrary'")
         assert "Open Library" in cover_page.locator("#detail-cover-source").inner_text()
@@ -651,9 +667,11 @@ def run() -> None:
         offline_ready = pwa_page.locator("#empty-add-manual").is_visible()
         assert offline_ready, {"cached": cached_urls, "errors": pwa_errors, "stored": pwa_page.evaluate("localStorage.getItem('yomu-reading-archive:v2')")}
         pwa_context.close()
+        from verify_mobile_ux import run_mobile_ux
+        run_mobile_ux(browser, BASE_URL, ARTIFACTS)
         browser.close()
 
-    print("PASS: staged mobile add, candidate covers, shelf filters, analytics drill-down, camera ISBN, persistence, migration, exports, offline PWA, and responsive layouts")
+    print("PASS: reading-first mobile UX, staged mobile add, candidate covers, shelf filters, analytics drill-down, camera ISBN, persistence, migration, exports, offline PWA, and responsive layouts")
 
 
 if __name__ == "__main__":
