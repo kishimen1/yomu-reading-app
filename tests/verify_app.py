@@ -652,6 +652,132 @@ def run() -> None:
         assert cleanup_page.evaluate("localStorage.getItem('yomu-demo-library-cleanup:v1') === '1'")
         cleanup_context.close()
 
+        # Backup reminders track real record changes on this device and never ride along in the backup file.
+        backup_context = browser.new_context(viewport={"width": 360, "height": 800}, accept_downloads=True, service_workers="block")
+        backup_page = backup_context.new_page()
+        backup_errors = []
+        backup_page.on("console", lambda message: backup_errors.append(message.text) if message.type == "error" else None)
+        backup_page.on("pageerror", lambda error: backup_errors.append(str(error)))
+        backup_page.route("https://api.openbd.jp/v1/get?*", lambda route: route.fulfill(status=200, content_type="application/json", body="[null]"))
+        backup_page.route("https://openlibrary.org/search.json?*", lambda route: route.fulfill(status=200, content_type="application/json", body='{"numFound":0,"docs":[]}'))
+        backup_page.route("https://books.google.com/books?*", lambda route: route.fulfill(status=200, content_type="application/javascript", body=f"{parse_qs(urlparse(route.request.url).query).get('callback', [''])[0]}({{}});"))
+        backup_page.add_init_script(
+            """(() => {
+                if (localStorage.getItem('yomu-reading-archive:v2')) return;
+                const common = {isbn:'', genre:'その他', pages:120, status:'read', rating:4, finishedAt:'2026-01-10', createdAt:'2026-01-01', notes:'', review:'', cover:0};
+                localStorage.setItem('yomu-demo-library-cleanup:v1', '1');
+                localStorage.setItem('yomu-reading-archive:v2', JSON.stringify({schemaVersion:2, books:
+                    [1, 2, 3, 4, 5].map(number => ({...common, id:`backup-${number}`, title:`バックアップ確認の本${number}`, author:'保存 太郎'}))
+                }));
+            })()"""
+        )
+        backup_state_script = "JSON.parse(localStorage.getItem('yomu-backup-state:v1') || 'null')"
+
+        def edit_backup_storage(script):
+            # Edit storage from a same-origin page where the app is not running, so background cover saves cannot overwrite it.
+            backup_page.goto(f"{BASE_URL}/manifest.json")
+            backup_page.evaluate(script)
+            open_with_retry(backup_page)
+        open_with_retry(backup_page)
+        reminder = backup_page.locator("#backup-reminder")
+        reminder.wait_for(state="visible")
+        assert reminder.inner_text().startswith("5冊が未バックアップ")
+        assert backup_page.locator("#shelf-pulse").is_hidden()
+        assert backup_page.locator(".book-card").first.bounding_box()["y"] <= 300
+        assert backup_page.locator("#backup-reminder-save").bounding_box()["height"] >= 44
+        assert backup_page.locator("#backup-storage").get_attribute("data-state") in ("persisted", "not-persisted", "unsupported")
+        assert backup_page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        backup_page.screenshot(path=str(ARTIFACTS / "backup-reminder-mobile.png"))
+        backup_page.set_viewport_size({"width": 1440, "height": 900})
+        assert "まだバックアップがありません" in reminder.inner_text()
+        assert "5冊の記録はこの端末にだけあります" in reminder.inner_text()
+        assert backup_page.locator("#shelf-pulse").is_visible()
+        backup_page.screenshot(path=str(ARTIFACTS / "backup-reminder-desktop.png"))
+        backup_page.set_viewport_size({"width": 360, "height": 800})
+
+        with backup_page.expect_download() as reminder_download:
+            backup_page.locator("#backup-reminder-save").click()
+        reminder_backup_path = ARTIFACTS / "test-reminder-backup.json"
+        reminder_download.value.save_as(str(reminder_backup_path))
+        reminder_backup = json.loads(reminder_backup_path.read_text(encoding="utf-8"))
+        assert len(reminder_backup["books"]) == 5
+        assert set(reminder_backup["settings"]) == {"theme", "goal", "synopsis"}
+        assert "snapshot" not in reminder_backup_path.read_text(encoding="utf-8")
+        assert reminder.is_hidden()
+        backup_state = backup_page.evaluate(backup_state_script)
+        assert backup_state["lastBackupAt"] and len(backup_state["snapshot"]) == 5
+
+        # Background cover checks rewrite cover fields only, so they must not count as unsaved changes.
+        backup_page.wait_for_function("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books.every(book => book.coverCheckedAt)")
+        backup_page.locator(".bottom-nav [data-nav=settings]").click()
+        assert "今日" in backup_page.locator("#backup-last").inner_text()
+        assert backup_page.locator("#backup-changes").inner_text() == "その後の変更はありません。"
+        assert backup_page.locator("#backup-status").get_attribute("data-state") == "current"
+        backup_page.screenshot(path=str(ARTIFACTS / "backup-settings-mobile.png"), full_page=True)
+
+        # Edit, delete and add one record each; a few recent changes are reported in settings without nagging.
+        edit_backup_storage(
+            """() => {
+                const library = JSON.parse(localStorage.getItem('yomu-reading-archive:v2'));
+                library.books[0].review = '読み返して印象が変わった';
+                library.books = library.books.filter(book => book.id !== 'backup-2');
+                library.books.push({...library.books[1], id: 'backup-new', title: '新しく読んだ本'});
+                localStorage.setItem('yomu-reading-archive:v2', JSON.stringify(library));
+            }"""
+        )
+        assert reminder.is_hidden()
+        backup_page.locator(".bottom-nav [data-nav=settings]").click()
+        assert backup_page.locator("#backup-changes").inner_text() == "その後3件の追加・編集・削除があります。"
+        assert backup_page.locator("#backup-status").get_attribute("data-state") == "outdated"
+
+        # An old backup with pending changes asks again, and "later" snoozes the reminder across reloads.
+        edit_backup_storage(
+            """() => {
+                const state = JSON.parse(localStorage.getItem('yomu-backup-state:v1'));
+                state.lastBackupAt = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+                localStorage.setItem('yomu-backup-state:v1', JSON.stringify(state));
+            }"""
+        )
+        reminder.wait_for(state="visible")
+        assert reminder.inner_text().startswith("前回の保存から40日")
+        assert backup_page.locator("#backup-reminder-title").text_content() == "前回のバックアップから40日たちました"
+        assert "その後3件の追加・編集・削除があります" in backup_page.locator("#backup-reminder-detail").text_content()
+        backup_page.locator("#backup-reminder-snooze").click()
+        assert reminder.is_hidden()
+        backup_page.reload(wait_until="networkidle")
+        backup_page.wait_for_timeout(300)
+        assert reminder.is_hidden()
+        assert backup_page.evaluate(backup_state_script)["snoozedUntil"]
+
+        # Many changes trigger the reminder even when the last backup is recent.
+        edit_backup_storage(
+            """() => {
+                const state = JSON.parse(localStorage.getItem('yomu-backup-state:v1'));
+                state.lastBackupAt = new Date().toISOString();
+                state.snoozedUntil = '';
+                localStorage.setItem('yomu-backup-state:v1', JSON.stringify(state));
+                const library = JSON.parse(localStorage.getItem('yomu-reading-archive:v2'));
+                for (let number = 0; number < 8; number += 1) library.books.push({...library.books[0], id: `bulk-${number}`, title: `まとめて登録${number}`});
+                localStorage.setItem('yomu-reading-archive:v2', JSON.stringify(library));
+            }"""
+        )
+        reminder.wait_for(state="visible")
+        assert reminder.inner_text().startswith("前回から11件の変更")
+        assert backup_page.locator("#backup-reminder-title").text_content() == "前回のバックアップから11件の変更があります"
+
+        # Restoring a backup file makes that file the latest backup of the restored shelf.
+        backup_page.locator(".bottom-nav [data-nav=settings]").click()
+        backup_page.set_input_files("#import-file", str(reminder_backup_path))
+        backup_page.wait_for_function("JSON.parse(localStorage.getItem('yomu-reading-archive:v2')).books.length === 5")
+        restored_state = backup_page.evaluate(backup_state_script)
+        assert restored_state["lastBackupAt"] == reminder_backup["exportedAt"]
+        assert len(restored_state["snapshot"]) == 5
+        assert backup_page.locator("#backup-changes").inner_text() == "その後の変更はありません。"
+        backup_page.locator(".bottom-nav [data-nav=shelf]").click()
+        assert reminder.is_hidden()
+        assert not backup_errors, backup_errors
+        backup_context.close()
+
         # The application shell and existing records remain available offline.
         pwa_context = browser.new_context(viewport={"width": 360, "height": 800})
         pwa_page = pwa_context.new_page()

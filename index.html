@@ -59,6 +59,12 @@
 
         <button class="shelf-pulse" id="shelf-pulse" data-nav="analytics" type="button"><span>今月 <strong id="month-count">0冊</strong> 読了</span><span>分析を見る <i data-lucide="arrow-up-right"></i></span></button>
 
+        <section class="backup-reminder" id="backup-reminder" aria-labelledby="backup-reminder-title" hidden>
+          <i data-lucide="hard-drive-download"></i>
+          <div class="backup-reminder-copy"><strong id="backup-reminder-title">記録をバックアップしましょう</strong><span id="backup-reminder-detail"></span><span class="backup-reminder-short" id="backup-reminder-short"></span></div>
+          <div class="backup-reminder-actions"><button class="primary-button" id="backup-reminder-save" type="button"><i data-lucide="download"></i><span>保存</span></button><button class="text-button" id="backup-reminder-snooze" type="button">あとで</button></div>
+        </section>
+
         <div class="library-toolbar">
           <div class="shelf-tabs" role="tablist" aria-label="本棚の種類">
             <button class="shelf-tab is-active" role="tab" aria-selected="true" data-filter="all">すべて <span id="all-count">0</span></button>
@@ -171,6 +177,15 @@
           </section>
           <section class="settings-section">
             <div class="settings-title"><i data-lucide="database"></i><div><h2>データ管理</h2><p>記録はこの端末内に保存されています。</p></div></div>
+            <div class="backup-status" id="backup-status">
+              <div class="backup-status-copy">
+                <span class="section-kicker">BACKUP</span>
+                <strong id="backup-last">まだバックアップしていません</strong>
+                <small id="backup-changes" role="status" aria-live="polite"></small>
+              </div>
+              <button class="primary-button" id="backup-now" type="button"><i data-lucide="download"></i><span>今すぐバックアップ</span></button>
+              <p class="backup-storage" id="backup-storage" data-state="unknown"><i data-lucide="shield"></i><span id="backup-storage-text">保存領域の保護状態を確認しています。</span></p>
+            </div>
             <div class="export-grid">
               <button class="export-option" id="export-csv" type="button"><span class="file-type">CSV</span><span><strong>分析用に書き出す</strong><small>Excel・BIツール向け</small></span><i data-lucide="download"></i></button>
               <button class="export-option" id="import-csv" type="button"><span class="file-type outline">CSV</span><span><strong>CSVから取り込む</strong><small>YOMU・ビブリア形式</small></span><i data-lucide="upload"></i></button>
@@ -190,7 +205,7 @@
             <label class="setting-row"><div><strong>あらすじをメモに追加</strong><span>書誌取得時に自動入力</span></div><input class="switch" type="checkbox" id="synopsis-toggle" checked></label>
           </section>
           <section class="settings-section about-section">
-            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>PWA 1.5.0</span></div></div>
+            <div class="about-brand"><img src="/assets/app-icon.png" alt=""><div><strong>YOMU</strong><span>PWA 1.6.0</span></div></div>
             <p>読書の記憶を、あとから読み解ける記録へ。</p>
             <span class="release-badge">LOCAL FIRST</span>
           </section>

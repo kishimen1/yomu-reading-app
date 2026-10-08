@@ -1,6 +1,12 @@
 # YOMU 読書記録PWA 引継書
 
-更新日: 2026-09-14
+更新日: 2026-10-08
+
+## v1.6.0：バックアップ忘れ防止の引継ぎ
+
+`src/backup-state.ts` が最終バックアップ日時と書籍ごとの指紋（利用者が入力した項目だけのハッシュ）を `yomu-backup-state:v1` に保存し、差分から変更件数とリマインド要否を判定する。表紙キャッシュ項目は指紋に含めない。本棚のリマインド、設定のバックアップ状態カード、`navigator.storage.persist()` の要求を追加した。JSONバックアップの形式と書籍スキーマは変更していない。リリースはアプリ版 `1.6.0`、SWキャッシュ `yomu-shell-v12`。Android実機での確認は未実施。
+
+あわせて、720px以下で分析のドーナツグラフが幅0に潰れる不具合を修正した。`tests/verify_app.py` はWindows以外でも `npm` とPlaywright同梱Chromium（`YOMU_CHROME_PATH` で上書き可）で実行できる。
 
 ## v1.5.0：スマホUI改善の引継ぎ
 
@@ -39,7 +45,7 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 - ISBN優先、ISBNなしは書名＋著者による重複検知
 - 選択年／全期間の読了数、ページ数、平均評価、著者数、ジャンル構成、月別推移、評価分布
 - UTF-8 BOM付きYOMU CSV出力、YOMU／ビブリアCSV取込
-- JSON完全バックアップ／復元
+- JSON完全バックアップ／復元、バックアップ後の変更件数表示とリマインド、保存領域の保護要求
 - ライト／ダーク表示、年間目標
 - Service Workerによるアプリ本体のオフラインキャッシュ
 - GitHub ActionsによるGitHub Pages自動公開
@@ -53,6 +59,7 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 | `src/shelf-state.ts` | 本棚検索、絞り込み、表示設定の保存・復元 |
 | `src/navigation.ts` | 画面履歴、戻る操作、未保存確認 |
 | `src/data.ts` | 型、スキーマv2、正規化、v1移行、旧デモ除去 |
+| `src/backup-state.ts` | 最終バックアップ日時、変更件数、リマインド判定 |
 | `src/csv.ts` | CSV解析、ビブリア変換、重複検知 |
 | `src/openbd.ts` | ISBN検証、openBD API接続 |
 | `src/google-books.ts` | Google Books Dynamic Links、ISBN完全一致の書影取得 |
@@ -60,7 +67,7 @@ YOMUはVite + TypeScript製のローカルファーストPWA。GitHub PagesでHT
 | `src/book-covers.ts` | 表紙取得順、厳密一致、30日再検索判定 |
 | `src/styles.css` | モバイル／タブレット／デスクトップUI |
 | `public/manifest.json` | PWAマニフェスト |
-| `public/sw.js` | オフラインキャッシュ `yomu-shell-v11` |
+| `public/sw.js` | オフラインキャッシュ `yomu-shell-v12` |
 | `.github/workflows/deploy-pages.yml` | `main` push時のGitHub Pages公開 |
 | `tests/verify_app.py` | 本番プレビューを使うPlaywright回帰テスト |
 | `tests/verify_mobile_ux.py` | モバイルUX、保存失敗、1,000冊、画面幅の回帰テスト |
@@ -72,6 +79,7 @@ yomu-reading-archive:v2
 yomu-settings:v2
 yomu-demo-library-cleanup:v1
 yomu-shelf-preferences:v1
+yomu-backup-state:v1
 ```
 
 旧 `:v1` キーは読み取り移行後も削除しない。

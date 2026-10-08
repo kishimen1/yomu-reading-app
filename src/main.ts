@@ -20,6 +20,7 @@ import { fetchOpenBdBook, isValidIsbn, normalizeIsbn } from "./openbd";
 import { searchOpenLibraryBooks } from "./book-search";
 import { coverLookupKey, resolveBookCover, shouldLookupBookCover } from "./book-covers";
 import { findGoogleBooksCoverByIsbn } from "./google-books";
+import { backupReminder, countChangesSinceBackup, daysSince, loadBackupState, recordBackup, saveBackupState, snoozeBackupReminder, BACKUP_REMINDER_SNOOZE_DAYS, type BackupState } from "./backup-state";
 
 import { createNavigation } from "./navigation";
 import { isShelfFilter, loadShelfPreferences, saveShelfPreferences, selectShelfBooks, type ShelfFilter, type ShelfView, type ShelfSort, type ShelfCriteria, type ShelfState } from "./shelf-state";
@@ -88,6 +89,10 @@ let directEntry = false;
 let detailNotice = "";
 let scannerGeneration = 0;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
+let backupState: BackupState = loadBackupState();
+type StorageProtection = "unknown" | "persisted" | "not-persisted" | "unsupported";
+let storageProtection: StorageProtection = "unknown";
+let storagePersistRequested = false;
 let catalogSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let catalogRequest: AbortController | null = null;
 let manualSearchRequest: AbortController | null = null;
@@ -589,6 +594,7 @@ function renderAll() {
   syncAnalyticsYearOptions();
   renderAnalytics();
   updateGoalUI();
+  renderBackupUI();
   iconize();
 }
 
@@ -1061,6 +1067,7 @@ function saveLibraryChange(next: Book[]): boolean {
   try {
     saveBooks(next);
     books = next;
+    void requestPersistentStorage();
     return true;
   } catch {
     showToast("保存できませんでした。入力は保持しています。端末の空き容量やブラウザーの保存設定を確認し、もう一度保存してください。");
@@ -1236,15 +1243,105 @@ function exportCsv() {
 function exportJson() {
   const backup = createBackup(books, settings);
   downloadFile(`yomu-backup-${todayIso()}.json`, JSON.stringify(backup, null, 2), "application/json");
+  updateBackupState(recordBackup(books));
+  void requestPersistentStorage();
   showToast("完全バックアップを書き出しました");
+}
+
+function updateBackupState(next: BackupState) {
+  backupState = next;
+  try { saveBackupState(backupState); } catch { /* The reminder state is advisory; the library itself is unaffected. */ }
+  renderBackupUI();
+}
+
+function formatBackupDate(isoTimestamp: string): string {
+  const date = new Date(isoTimestamp);
+  const days = daysSince(isoTimestamp);
+  const label = new Intl.DateTimeFormat("ja-JP", { year: "numeric", month: "long", day: "numeric" }).format(date);
+  return `${label}（${days === 0 ? "今日" : `${days}日前`}）`;
+}
+
+function renderBackupUI() {
+  const reminder = backupReminder(books, backupState);
+  const banner = $("#backup-reminder");
+  banner.hidden = reminder === null;
+  if (reminder) {
+    const title = reminder.reason === "never"
+      ? "まだバックアップがありません"
+      : reminder.reason === "stale"
+        ? `前回のバックアップから${reminder.daysSinceBackup}日たちました`
+        : `前回のバックアップから${reminder.changes}件の変更があります`;
+    const detail = reminder.reason === "never"
+      ? `${books.length}冊の記録はこの端末にだけあります。ファイルに保存しておくと、機種変更やデータ削除のときに復元できます。`
+      : reminder.reason === "stale"
+        ? `その後${reminder.changes}件の追加・編集・削除があります。最新の記録をファイルに保存しておきましょう。`
+        : "最新の記録をファイルに保存しておきましょう。";
+    // Phones show a one-line summary so the reminder does not push the shelf below the fold.
+    const short = reminder.reason === "never"
+      ? `${books.length}冊が未バックアップ`
+      : reminder.reason === "stale"
+        ? `前回の保存から${reminder.daysSinceBackup}日`
+        : `前回から${reminder.changes}件の変更`;
+    $("#backup-reminder-title").textContent = title;
+    $("#backup-reminder-detail").textContent = detail;
+    $("#backup-reminder-short").textContent = short;
+  }
+
+  const changes = backupState.lastBackupAt ? countChangesSinceBackup(books, backupState.snapshot) : books.length;
+  $("#backup-last").textContent = backupState.lastBackupAt ? `前回のバックアップ: ${formatBackupDate(backupState.lastBackupAt)}` : "まだバックアップしていません";
+  $("#backup-changes").textContent = !backupState.lastBackupAt
+    ? (books.length ? `${books.length}冊の記録がまだファイルに保存されていません。` : "本を登録したら、JSONファイルに保存できます。")
+    : changes ? `その後${changes}件の追加・編集・削除があります。` : "その後の変更はありません。";
+  $("#backup-status").dataset.state = !backupState.lastBackupAt ? (books.length ? "missing" : "empty") : changes ? "outdated" : "current";
+  renderStorageProtection();
+}
+
+function renderStorageProtection() {
+  const element = $("#backup-storage");
+  if (element.dataset.state === storageProtection) return;
+  const content: Record<StorageProtection, [string, string]> = {
+    unknown: ["shield", "保存領域の保護状態を確認しています。"],
+    persisted: ["shield-check", "この端末の保存領域は保護されています。容量不足でブラウザーが自動削除することはありません。ブラウザーデータの削除や機種変更に備えて、バックアップも保存してください。"],
+    "not-persisted": ["shield-alert", "容量不足のとき、ブラウザーが記録を削除する可能性があります。ホーム画面に追加すると保護されやすくなります。定期的にバックアップを保存してください。"],
+    unsupported: ["shield", "このブラウザーでは保存領域の保護状態を確認できません。定期的にバックアップを保存してください。"],
+  };
+  const [icon, message] = content[storageProtection];
+  element.dataset.state = storageProtection;
+  element.innerHTML = `<i data-lucide="${icon}"></i><span id="backup-storage-text">${escapeHtml(message)}</span>`;
+  iconize();
+}
+
+/** Asks the browser not to evict localStorage under storage pressure; browsers may grant it silently. */
+async function requestPersistentStorage() {
+  const storage = navigator.storage;
+  if (!storage?.persisted) {
+    storageProtection = "unsupported";
+    renderStorageProtection();
+    return;
+  }
+  try {
+    let persisted = await storage.persisted();
+    if (!persisted && !storagePersistRequested && books.length > 0 && storage.persist) {
+      storagePersistRequested = true;
+      persisted = await storage.persist();
+    }
+    storageProtection = persisted ? "persisted" : "not-persisted";
+  } catch {
+    storageProtection = "unsupported";
+  }
+  renderStorageProtection();
 }
 
 async function importJson(file: File) {
   try {
-    const imported = parseBackup(JSON.parse(await file.text()) as unknown);
+    const raw = JSON.parse(await file.text()) as unknown;
+    const imported = parseBackup(raw);
     books = imported.books;
     if (imported.settings) settings = imported.settings;
     persist();
+    // The restored file is itself an up-to-date backup of what is now on the shelf.
+    const exportedAt = typeof raw === "object" && raw !== null && "exportedAt" in raw ? new Date(String(raw.exportedAt)) : new Date(Number.NaN);
+    updateBackupState(recordBackup(books, Number.isNaN(exportedAt.getTime()) || exportedAt.getTime() > Date.now() ? new Date() : exportedAt));
     applyTheme(settings.theme);
     renderAll();
     showToast(`${books.length}件の読書記録を復元しました`);
@@ -1520,6 +1617,12 @@ function initializeEvents() {
 
   $("#export-csv").addEventListener("click", exportCsv);
   $("#export-json").addEventListener("click", exportJson);
+  $("#backup-now").addEventListener("click", exportJson);
+  $("#backup-reminder-save").addEventListener("click", exportJson);
+  $("#backup-reminder-snooze").addEventListener("click", () => {
+    updateBackupState(snoozeBackupReminder(backupState));
+    showToast(`${BACKUP_REMINDER_SNOOZE_DAYS}日後にもう一度お知らせします`);
+  });
   $("#import-csv").addEventListener("click", () => $<HTMLInputElement>("#import-csv-file").click());
   $<HTMLInputElement>("#import-csv-file").addEventListener("change", event => {
     const input = event.currentTarget as HTMLInputElement;
@@ -1580,6 +1683,7 @@ function initialize() {
   renderAll();
   setTimeout(iconize, 150);
   scheduleCoverBackfill(900);
+  void requestPersistentStorage();
   if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 

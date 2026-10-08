@@ -728,3 +728,39 @@ body[data-theme="dark"] .scan-entry .scan-button { background: var(--ink); color
   .record-scroll { padding-left: 12px; padding-right: 12px; }
   .rating-control .clear-rating { margin-left: 0; }
 }
+
+/* Backup reminder and status */
+.backup-reminder { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 12px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--yellow); border-radius: var(--radius); background: var(--cream); }
+.backup-reminder[hidden] { display: none; }
+.backup-reminder > svg { width: 20px; height: 20px; color: var(--yellow); }
+.backup-reminder-copy { display: grid; gap: 4px; min-width: 0; }
+.backup-reminder-copy strong { font-size: 14px; line-height: 1.5; }
+.backup-reminder-copy span { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.backup-reminder-actions { display: flex; align-items: center; gap: 14px; }
+.backup-reminder-actions .text-button { font-size: 12px; }
+.backup-status { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px 20px; margin-bottom: 18px; padding: 18px 20px; border: 1px solid var(--line); border-left: 3px solid var(--green); background: var(--surface); }
+.backup-status[data-state="missing"], .backup-status[data-state="outdated"] { border-left-color: var(--yellow); }
+.backup-status-copy { display: grid; gap: 5px; min-width: 0; }
+.backup-status-copy .section-kicker { margin: 0; }
+.backup-status-copy strong { font-size: 15px; line-height: 1.5; }
+.backup-status-copy small { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.backup-storage { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 8px; margin: 0; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.7; }
+.backup-storage svg { flex: 0 0 auto; width: 16px; height: 16px; margin-top: 1px; color: var(--muted); }
+.backup-storage[data-state="persisted"] svg { color: var(--green); }
+.backup-storage[data-state="not-persisted"] svg { color: var(--yellow); }
+
+.backup-reminder-short { display: none; }
+
+@media (max-width: 720px) {
+  /* While a reminder is shown, it takes the monthly pulse row so the first books stay above the fold. */
+  .shelf-pulse:has(+ .backup-reminder:not([hidden])) { display: none; }
+  .backup-reminder { grid-template-columns: 1fr auto auto; gap: 4px; margin: 0 0 4px; padding: 0 0 0 12px; }
+  .backup-reminder > svg, .backup-reminder-copy strong, .backup-reminder-copy #backup-reminder-detail { display: none; }
+  .backup-reminder-short { display: block; color: var(--ink); font-size: 13px; font-weight: 700; line-height: 1.4; }
+  .backup-reminder-actions { display: contents; }
+  .backup-reminder-actions .primary-button { padding: 0 12px; font-size: 13px; }
+  .backup-reminder-actions .primary-button svg { display: none; }
+  .backup-reminder-actions .text-button { min-width: 48px; border-bottom: 0; }
+  .backup-status { grid-template-columns: 1fr; padding: 16px; }
+  .backup-status .primary-button { width: 100%; }
+}

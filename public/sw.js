@@ -1,4 +1,4 @@
-const CACHE_NAME = "yomu-shell-v11";
+const CACHE_NAME = "yomu-shell-v12";
 const CORE_SHELL = [
   "./",
   "./index.html",
