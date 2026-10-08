@@ -3,6 +3,7 @@ import csv
 from datetime import date
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 from time import sleep
@@ -15,12 +16,15 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / "artifacts"
 BASE_URL = "http://127.0.0.1:4173"
+# Windows keeps the existing Chrome install; other platforms use YOMU_CHROME_PATH or Playwright's bundled Chromium.
+NPM_COMMAND = "npm.cmd" if os.name == "nt" else "npm"
+CHROME_PATH = os.environ.get("YOMU_CHROME_PATH") or (r"C:\Program Files\Google\Chrome\Application\chrome.exe" if os.name == "nt" else None)
 
 
 @contextmanager
 def preview_server():
     process = subprocess.Popen(
-        ["npm.cmd", "run", "preview", "--", "--host", "127.0.0.1", "--port", "4173", "--strictPort"],
+        [NPM_COMMAND, "run", "preview", "--", "--host", "127.0.0.1", "--port", "4173", "--strictPort"],
         cwd=ROOT,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.STDOUT,
@@ -66,7 +70,7 @@ def run() -> None:
     with preview_server(), sync_playwright() as playwright:
         browser = playwright.chromium.launch(
             headless=True,
-            executable_path=r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            executable_path=CHROME_PATH,
         )
         context = browser.new_context(
             viewport={"width": 360, "height": 800},

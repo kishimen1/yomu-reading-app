@@ -274,9 +274,9 @@ def run_mobile_ux(browser, base_url, artifacts):
 
 if __name__ == "__main__":
     from playwright.sync_api import sync_playwright
-    from verify_app import preview_server, BASE_URL, ARTIFACTS
+    from verify_app import preview_server, BASE_URL, ARTIFACTS, CHROME_PATH
     with preview_server(), sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True, executable_path=r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+        browser = playwright.chromium.launch(headless=True, executable_path=CHROME_PATH)
         try:
             run_mobile_ux(browser, BASE_URL, ARTIFACTS)
         except Exception:

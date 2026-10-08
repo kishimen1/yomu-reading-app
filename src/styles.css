@@ -708,6 +708,7 @@ body[data-theme="dark"] .scan-entry .scan-button { background: var(--ink); color
   .month-bar { min-width: 48px; }
   .month-bar strong, .month-bar span { font-size: 12px; }
   .donut-layout { grid-template-columns: 1fr; justify-items: center; }
+  .donut { width: min(190px, 100%); }
   .genre-legend { width: 100%; }
   .legend-row { width: 100%; }
   .kpi span, .kpi small { font-size: 12px; }
