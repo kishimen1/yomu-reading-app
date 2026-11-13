@@ -17,7 +17,7 @@ import {
 } from "./data";
 import { hasDuplicateBook, mergeImportedBooks, parseBooksCsv } from "./csv";
 import { fetchOpenBdBook, isValidIsbn, normalizeIsbn } from "./openbd";
-import { searchOpenLibraryBooks } from "./book-search";
+import { searchBooks } from "./book-search";
 import { coverLookupKey, resolveBookCover, shouldLookupBookCover } from "./book-covers";
 import { findGoogleBooksCoverByIsbn } from "./google-books";
 
@@ -904,7 +904,7 @@ async function searchManualBooks(searchTerm: string) {
   if (!term) {
     visibleManualSearchBooks = [];
     renderManualSearchResults([], "タイトル、著者、出版社、ISBNのいずれかを入力してください。");
-    $("#manual-search-source").textContent = "検索語を入力すると、Open Libraryの収録範囲から候補を探します。";
+    $("#manual-search-source").textContent = "検索語を入力すると、国立国会図書館サーチとOpen Libraryから候補を探します。";
     updateNdlSearchLink("");
     return;
   }
@@ -913,16 +913,16 @@ async function searchManualBooks(searchTerm: string) {
   manualSearchRequest = request;
   updateNdlSearchLink(term);
   $("#manual-search-source").textContent = "本の候補を検索しています…";
-  $("#manual-search-results").innerHTML = '<p class="catalog-empty">Open Libraryを検索中です。</p>';
+  $("#manual-search-results").innerHTML = '<p class="catalog-empty">国立国会図書館サーチとOpen Libraryを検索中です。</p>';
 
   try {
-    const results = await searchOpenLibraryBooks(term, request.signal);
+    const results = await searchBooks(term, request.signal);
     if (request.signal.aborted) return;
     visibleManualSearchBooks = results;
     renderManualSearchResults(results, "候補が見つかりませんでした。入力欄へ直接記入できます。");
     $("#manual-search-source").textContent = results.length
       ? `${results.length}件の候補です。ISBNのある候補は表紙も確認しています。`
-      : "Open Libraryの収録範囲では候補が見つかりませんでした。直接入力、または国立国会図書館サーチで確認できます。";
+      : "候補が見つかりませんでした。書名だけ・著者だけなど語を減らして再検索するか、直接入力できます。";
     await hydrateManualSearchCovers(results, request);
     if (request.signal.aborted) return;
     $("#manual-search-source").textContent = results.length

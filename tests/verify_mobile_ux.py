@@ -29,6 +29,7 @@ def run_mobile_ux(browser, base_url, artifacts):
         page.on("pageerror", lambda error: errors.append(error.stack or str(error)))
         page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
         page.route("https://openlibrary.org/**", lambda route: route.fulfill(json={"docs": []}))
+        page.route("https://ndlsearch.ndl.go.jp/api/**", lambda route: route.fulfill(content_type="application/rss+xml", body='<rss version="2.0"><channel></channel></rss>'))
         page.route("https://api.openbd.jp/**", lambda route: route.fulfill(json=[None]))
         if count:
             payload = json.dumps({"schemaVersion": 2, "books": make_books(count)}, ensure_ascii=False)
