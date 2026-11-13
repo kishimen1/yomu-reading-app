@@ -112,6 +112,59 @@ def run() -> None:
             ],
         }
 
+        open_library_docs["海辺の検証"] = [
+            {
+                "key": "/works/OL-YOMU-NDL-1W",
+                "title": "海辺の検証",
+                "author_name": ["三浦 汐"],
+                "isbn": ["9784065243305"],
+                "cover_i": 202,
+            },
+        ]
+        ndl_search_requests = []
+        ndl_items = {
+            "海辺の検証": """
+                <item>
+                  <title>海辺の検証</title>
+                  <author>三浦汐 著,森本環 訳</author>
+                  <dc:title>海辺の検証</dc:title>
+                  <dc:creator>三浦, 汐, 1980-</dc:creator>
+                  <dc:publisher>国会出版</dc:publisher>
+                  <dc:identifier xsi:type="dcndl:ISBN">978-4-06-524330-5</dc:identifier>
+                  <dc:extent>251p ; 19cm</dc:extent>
+                </item>
+                <item>
+                  <title>海辺の検証</title>
+                  <author>三浦汐 著</author>
+                  <dcndl:volume>文庫版</dcndl:volume>
+                  <dc:publisher>国会文庫</dc:publisher>
+                  <dc:identifier xsi:type="dcndl:ISBN">9784495210465</dc:identifier>
+                  <dc:extent>302p ; 15cm</dc:extent>
+                </item>
+                <item>
+                  <title>月刊海辺の検証</title>
+                  <dc:publisher>雑誌社</dc:publisher>
+                  <dc:identifier xsi:type="dcndl:ISSN">1234-5678</dc:identifier>
+                </item>
+                <item>
+                  <title>無関係な海の本</title>
+                  <author>別人 編</author>
+                  <dc:publisher>別出版</dc:publisher>
+                </item>""",
+        }
+
+        def handle_ndl_search(route):
+            parameters = parse_qs(urlparse(route.request.url).query)
+            ndl_search_requests.append(parameters)
+            items = ndl_items.get(parameters.get("any", [""])[0], "")
+            body = (
+                '<?xml version="1.0" encoding="UTF-8"?>'
+                '<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcndl="http://ndl.go.jp/dcndl/terms/" '
+                'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><channel><title>NDL</title>'
+                f"{items}</channel></rss>"
+            )
+            route.fulfill(status=200, content_type="application/rss+xml; charset=utf-8", body=body)
+
         def handle_openbd(route):
             isbn = parse_qs(urlparse(route.request.url).query).get("isbn", [""])[0]
             record = openbd_records.get(isbn)
@@ -142,6 +195,7 @@ def run() -> None:
         page.route("https://books.google.com/books?*", handle_google_books)
         page.route("https://books.google.com/books/content?*", lambda route: route.fulfill(path=str(ROOT / "public" / "assets" / "app-icon-192.png"), content_type="image/png"))
         page.route("https://openlibrary.org/search.json?*", handle_open_library)
+        page.route("https://ndlsearch.ndl.go.jp/api/opensearch?*", handle_ndl_search)
         page.route("https://covers.openlibrary.org/b/id/*", lambda route: route.fulfill(path=str(ROOT / "public" / "assets" / "app-icon-192.png"), content_type="image/png"))
 
         open_with_retry(page)
@@ -164,6 +218,24 @@ def run() -> None:
         # then register a complete reading record and prove it survives reload.
         page.locator("#empty-add-manual").click()
         form = page.locator("#manual-form")
+        # Japanese titles missing from Open Library are found through NDL Search;
+        # duplicates merge by ISBN, serials are dropped, and close titles rank first.
+        page.locator("#manual-book-query").fill("海辺の検証")
+        page.locator("#manual-book-search").click()
+        page.locator("#manual-search-results .manual-search-result").first.wait_for()
+        ndl_results = page.locator("#manual-search-results .manual-search-result")
+        assert ndl_results.count() == 3
+        assert ndl_search_requests[-1]["any"] == ["海辺の検証"]
+        first_ndl_result = ndl_results.nth(0).inner_text()
+        assert "海辺の検証" in first_ndl_result and "三浦 汐" in first_ndl_result
+        assert "国会出版" in first_ndl_result and "9784065243305" in first_ndl_result
+        assert ndl_results.nth(0).locator(".result-cover.has-real-cover").count() == 1
+        second_ndl_result = ndl_results.nth(1).inner_text()
+        assert "海辺の検証 文庫版" in second_ndl_result and "三浦汐" in second_ndl_result and "著" not in second_ndl_result
+        assert "無関係な海の本" in ndl_results.nth(2).inner_text()
+        assert "月刊海辺の検証" not in page.locator("#manual-search-results").inner_text()
+        page.screenshot(path=str(ARTIFACTS / "mobile-title-search-ndl.png"), full_page=True)
+
         page.locator("#manual-book-query").fill("境界を歩く 佐伯 凛")
         page.locator("#manual-book-search").click()
         manual_result = page.get_by_role("button", name="境界を歩くを入力欄に反映")

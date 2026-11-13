@@ -1,8 +1,10 @@
 import type { Book, CatalogBook } from "./data";
+import { searchNdlBooks } from "./ndl-search";
 import { isValidIsbn, normalizeIsbn } from "./openbd";
 
 const OPEN_LIBRARY_SEARCH_ENDPOINT = "https://openlibrary.org/search.json";
 const OPEN_LIBRARY_SEARCH_LIMIT = 24;
+const BOOK_SEARCH_RESULT_LIMIT = 30;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -139,4 +141,65 @@ export async function findOpenLibraryCoverForBook(book: Pick<Book, "title" | "au
   });
 
   return exact ? coverUrl(exact.cover_i) : "";
+}
+
+function searchTokens(searchTerm: string): string[] {
+  return searchTerm.normalize("NFKC").toLocaleLowerCase("ja").split(/[\s\u3000]+/).filter(Boolean);
+}
+
+function relevance(book: CatalogBook, tokens: string[]): number {
+  const title = normalizedText(book.title);
+  const credits = normalizedText(`${book.author}${book.publisher}`);
+  let score = 0;
+  if (title === tokens.join("") || tokens.includes(title)) score += 4;
+  tokens.forEach(token => {
+    if (title.includes(token)) score += 2;
+    else if (credits.includes(token)) score += 1;
+  });
+  if (book.isbn) score += 1;
+  return score;
+}
+
+function mergeCatalogBook(target: CatalogBook, duplicate: CatalogBook) {
+  if (!target.coverUrl && duplicate.coverUrl) {
+    target.coverUrl = duplicate.coverUrl;
+    target.coverSource = duplicate.coverSource;
+  }
+  if (!target.isbn && duplicate.isbn) target.isbn = duplicate.isbn;
+  if (!target.pages && duplicate.pages) target.pages = duplicate.pages;
+  if (!target.publisher && duplicate.publisher) target.publisher = duplicate.publisher;
+  if (target.author === "著者不明" && duplicate.author) target.author = duplicate.author;
+}
+
+// Open Libraryは日本語書籍の収録が少ないため、国立国会図書館サーチと並行して検索し、
+// 片方が失敗しても残りの結果を返す。重複は先に見つかった候補へ統合する。
+export async function searchBooks(searchTerm: string, signal?: AbortSignal): Promise<CatalogBook[]> {
+  const term = searchTerm.trim();
+  if (!term) return [];
+  const settled = await Promise.allSettled([
+    searchOpenLibraryBooks(term, signal),
+    searchNdlBooks(term, signal),
+  ]);
+  const fulfilled = settled.filter((result): result is PromiseFulfilledResult<CatalogBook[]> => result.status === "fulfilled");
+  if (!fulfilled.length) throw (settled[0] as PromiseRejectedResult).reason;
+
+  const byKey = new Map<string, CatalogBook>();
+  const merged: CatalogBook[] = [];
+  fulfilled.flatMap(result => result.value).forEach(book => {
+    const keys = [
+      isbn13(book.isbn),
+      book.isbn ? "" : `${normalizedText(book.title)}\u0000${normalizedText(book.author)}`,
+    ].filter(Boolean);
+    const existing = keys.map(key => byKey.get(key)).find(Boolean);
+    if (existing) mergeCatalogBook(existing, book);
+    else merged.push(book);
+    keys.forEach(key => byKey.set(key, existing || book));
+  });
+
+  const tokens = searchTokens(term);
+  return merged
+    .map((book, index) => ({ book, index, score: relevance(book, tokens) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, BOOK_SEARCH_RESULT_LIMIT)
+    .map(entry => entry.book);
 }
